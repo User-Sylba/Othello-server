@@ -4,124 +4,126 @@ import json
 import random
 import logging
 import asyncio
-import logging
+import redis.asyncio as redis
 
 logging.basicConfig(level=logging.INFO)
 
 app = FastAPI()
-connected_users = {}
+rdb = redis.Redis(host="localhost", port=6379, decode_responses=True)  # Redis接続
+
+connected_sockets = {}
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    logging.info("[CONNECT]WebSocket 接続を受け付けました")
+    logging.info("[CONNECT] WebSocket 接続開始")
     await websocket.accept()
 
-    init_message = await websocket.receive_text()
-    init_data = json.loads(init_message)
-
-    print(f"[SERVER]最初のデータ受信:{init_data}")
-    if init_data.get("type") == "init":
-         user_id = init_data.get("user_id")
-         name = init_data.get("name")
-         print(f"[INIT] user_id:{user_id},name:{name}")
-
-         if not user_id or user_id not in connected_users:
-             connected_users[user_id] = {
-             "socket": websocket,
-             "name": None,
-             "status": "waiting",
-             "opponent": None
-              }
-        
-         else:
-             connected_users[user_id]["socket"] = websocket
-             if connected_users[user_id]["opponent"]:
-                 opponent_id = connected_users[user_id]["opponent"]
-                 if opponent_id in connected_users:
-                     opponent_socket = connected_users[opponent_id]["socket"]
-                     await opponent_socket.send_text(json.dumps({
-                         "type": "opponent_reconnected"
-                     }))
     try:
+        init_message = await websocket.receive_text()
+        init_data = json.loads(init_message)
+
+        user_id = init_data.get("user_id")
+        name = init_data.get("name")
+        print(f"[INIT] user_id:{user_id}, name:{name}")
+
+        await rdb.hset(f"user:{user_id}", mapping={
+            "name": name,
+            "status": "waiting",
+            "opponent": ""
+        })
+        connected_sockets[user_id] = websocket
+
+        # 再接続時の通知
+        opponent_id = await rdb.hget(f"user:{user_id}", "opponent")
+        if opponent_id:
+            opponent_socket = connected_sockets.get(opponent_id)
+            if opponent_socket:
+                await opponent_socket.send_text(json.dumps({
+                    "type": "opponent_reconnected"
+                }))
+
         while True:
             message = await websocket.receive_text()
             data = json.loads(message)
 
             if data.get("type") == "register":
-                print(f"[REGISTER]{user_id}({data.get('name')})が登録されました")
-                connected_users[user_id]["status"] = "waiting"
-                connected_users[user_id]["name"] = data.get("name")
+                await rdb.hset(f"user:{user_id}", mapping={
+                    "name": name,
+                    "status": "waiting"
+                })
                 asyncio.create_task(try_match(user_id))
-                
-                
 
             elif data.get("type") == "move":
-                opponent_id = connected_users[user_id]["opponent"]
-                if opponent_id and opponent_id in connected_users:
-                    opponent_socket = connected_users[opponent_id]["socket"]
-                    await opponent_socket.send_text(json.dumps({
+                opponent_id = await rdb.hget(f"user:{user_id}", "opponent")
+                if opponent_id in connected_sockets:
+                    await connected_sockets[opponent_id].send_text(json.dumps({
                         "type": "move",
                         "x": data["x"],
                         "y": data["y"]
                     }))
 
     except WebSocketDisconnect:
-        print(f"{user_id} が切断されました")
-        opponent_id = connected_users[user_id]["opponent"]
-        if opponent_id and opponent_id in connected_users:
-            try:
-                await connected_users[opponent_id]["socket"].send_text(json.dumps({
-                    "type": "opponent_disconnected"
-                }))
-                connected_users[opponent_id]["status"] = "waiting"
-                connected_users[opponent_id]["opponent"] = None
-            except:
-                pass
-        del connected_users[user_id]
+        logging.info(f"[DISCONNECT] {user_id} が切断されました")
+        await handle_disconnect(user_id)
 
 async def try_match(current_id):
-    waiting_users = [uid for uid, info in connected_users.items() if info["status"] == "waiting"]
-    if len(waiting_users) >= 2:
-        
-        for other_id in waiting_users:
-            if other_id !=current_id:
-                user1_id = current_id
-                user2_id = other_id
-                break
-        else:
-            return
+    all_keys = await rdb.keys("user:*")
+    waiting_users = []
+    for key in all_keys:
+        uid = key.split(":")[1]
+        status = await rdb.hget(key, "status")
+        if status == "waiting":
+            waiting_users.append(uid)
 
-        if user1_id not in connected_users or user2_id not in connected_users:
-            return  # 念のため再確認
+    if len(waiting_users) < 2:
+        return
 
-        user1 = connected_users[user1_id]
-        user2 = connected_users[user2_id]
+    user1_id = current_id
+    user2_id = next((uid for uid in waiting_users if uid != user1_id), None)
+    if not user2_id:
+        return
 
-        # 色と先手をランダムに決定
-        colors = ["black", "white"]
-        random.shuffle(colors)
-        first_turn = "black"
+    user1_name = await rdb.hget(f"user:{user1_id}", "name")
+    user2_name = await rdb.hget(f"user:{user2_id}", "name")
 
-        # 対戦情報を登録
-        user1["status"] = "matched"
-        user2["status"] = "matched"
-        user1["opponent"] = user2_id
-        user2["opponent"] = user1_id
+    # 色と先手をランダムに
+    colors = ["black", "white"]
+    random.shuffle(colors)
+    first_turn = "black"
 
-        print(f"[MATCH SUCCESS]{user1_id}と{user2_id}がマッチしました")
+    await rdb.hset(f"user:{user1_id}", mapping={"status": "matched", "opponent": user2_id})
+    await rdb.hset(f"user:{user2_id}", mapping={"status": "matched", "opponent": user1_id})
 
-        await asyncio.sleep(5.0)
+    print(f"[MATCH] {user1_id} vs {user2_id}")
 
-        await user1["socket"].send_text(json.dumps({
-            "type": "start_game",
-            "your_color": colors[0],
-            "opponent_name": user2["name"],
-            "first_turn": first_turn
-        }))
+    await asyncio.sleep(2.0)
 
-        await user2["socket"].send_text(json.dumps({
-            "type": "start_game",
-            "your_color": colors[1],
-            "opponent_name": user1["name"],
-            "first_turn": first_turn
-        }))
+    await connected_sockets[user1_id].send_text(json.dumps({
+        "type": "start_game",
+        "your_color": colors[0],
+        "opponent_name": user2_name,
+        "first_turn": first_turn
+    }))
+    await connected_sockets[user2_id].send_text(json.dumps({
+        "type": "start_game",
+        "your_color": colors[1],
+        "opponent_name": user1_name,
+        "first_turn": first_turn
+    }))
+
+async def handle_disconnect(user_id):
+    opponent_id = await rdb.hget(f"user:{user_id}", "opponent")
+    await rdb.delete(f"user:{user_id}")
+    connected_sockets.pop(user_id, None)
+
+    if opponent_id and opponent_id in connected_sockets:
+        try:
+            await connected_sockets[opponent_id].send_text(json.dumps({
+                "type": "opponent_disconnected"
+            }))
+            await rdb.hset(f"user:{opponent_id}", mapping={
+                "status": "waiting",
+                "opponent": ""
+            })
+        except:
+            pass
