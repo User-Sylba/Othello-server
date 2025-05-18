@@ -5,11 +5,19 @@ import random
 import logging
 import asyncio
 import redis.asyncio as redis
+import os
+from dotenv import load_dotenv
+
+
+load_dotenv()  # .env を読み込む
+
+redis_url = os.getenv("REDIS_URL")
+rdb = redis.from_url(redis_url, decode_responses=True)
 
 logging.basicConfig(level=logging.INFO)
 
 app = FastAPI()
-rdb = redis.Redis(host="localhost", port=6379, decode_responses=True)  # Redis接続
+
 
 connected_sockets = {}
 
