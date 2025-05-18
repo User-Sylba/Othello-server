@@ -17,3 +17,4 @@ typing_extensions==4.13.1
 uvicorn==0.34.1
 websockets==15.0.1
 redis[asyncio]==5.0.3
+python-dotenv
