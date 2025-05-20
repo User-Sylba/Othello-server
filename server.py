@@ -24,6 +24,8 @@ connected_sockets = {}
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     logging.info("[CONNECT] WebSocket 接続開始")
+            # 再接続時に盤面・ターンを復元送信
+    
     await websocket.accept()
 
     try:
@@ -33,6 +35,16 @@ async def websocket_endpoint(websocket: WebSocket):
         user_id = init_data.get("user_id")
         name = init_data.get("name")
         print(f"[INIT] user_id:{user_id}, name:{name}")
+
+        board_data = await rdb.get(f"board:{user_id}")
+        turn = await rdb.get(f"turn:{user_id}")
+
+        if board_data and turn:
+            await websocket.send_text(json.dumps({
+                "type": "restore_board",
+                "board": json.loads(board_data),
+                "current_player": turn
+            }))
 
         await rdb.hset(f"user:{user_id}", mapping={
             "name": name,
@@ -62,13 +74,47 @@ async def websocket_endpoint(websocket: WebSocket):
                 asyncio.create_task(try_match(user_id))
 
             elif data.get("type") == "move":
+                 opponent_id = await rdb.hget(f"user:{user_id}", "opponent")
+
+                 await rdb.set(f"board:{user_id}", json.dumps(data["board"]), ex=40)
+                 await rdb.set(f"board:{opponent_id}", json.dumps(data["board"]), ex=40)
+                 await rdb.set(f"turn:{user_id}", data["next_turn"], ex=40)
+                 await rdb.set(f"turn:{opponent_id}", data["next_turn"], ex=40)
+
+                 if opponent_id in connected_sockets:
+                     await connected_sockets[opponent_id].send_text(json.dumps({
+                          "type": "move",
+                          "x": data["x"],
+                          "y": data["y"]
+                     }))
+            elif data.get("type") == "pass":
                 opponent_id = await rdb.hget(f"user:{user_id}", "opponent")
+
+    # 現在の盤面とターン情報を保存
+                await rdb.set(f"board:{user_id}", json.dumps(data["board"]), ex=40)
+                await rdb.set(f"board:{opponent_id}", json.dumps(data["board"]), ex=40)
+                await rdb.set(f"turn:{user_id}", data["next_turn"], ex=40)
+                await rdb.set(f"turn:{opponent_id}", data["next_turn"], ex=40)
+
                 if opponent_id in connected_sockets:
-                    await connected_sockets[opponent_id].send_text(json.dumps({
-                        "type": "move",
-                        "x": data["x"],
-                        "y": data["y"]
-                    }))
+                     await connected_sockets[opponent_id].send_text(json.dumps({
+                     "type": "pass"
+                     }))
+            elif data.get("type") == "end_game":
+                opponent_id = await rdb.hget(f"user:{user_id}", "opponent")
+
+    
+                await rdb.delete(f"board:{user_id}")
+                await rdb.delete(f"board:{opponent_id}")
+                await rdb.delete(f"turn:{user_id}")
+                await rdb.delete(f"turn:{opponent_id}")
+
+    
+                if opponent_id in connected_sockets:
+                     await connected_sockets[opponent_id].send_text(json.dumps({
+                    "type": "end_game"
+                     }))
+
 
     except WebSocketDisconnect:
         logging.info(f"[DISCONNECT] {user_id} が切断されました")
@@ -118,6 +164,17 @@ async def try_match(current_id):
         "opponent_name": user1_name,
         "first_turn": first_turn
     }))
+    save_board = [[0]*8 for _ in range(8)]
+    mid = 4
+    save_board[mid - 1][mid - 1] = -1
+    save_board[mid][mid] = -1
+    save_board[mid - 1][mid] = 1
+    save_board[mid][mid - 1] = 1
+
+    await rdb.set(f"board:{user1_id}", json.dumps(save_board), ex=40)
+    await rdb.set(f"board:{user2_id}", json.dumps(save_board), ex=40)
+    await rdb.set(f"turn:{user1_id}", first_turn, ex=40)
+    await rdb.set(f"turn:{user2_id}", first_turn, ex=40)
 
 async def handle_disconnect(user_id):
     opponent_id = await rdb.hget(f"user:{user_id}", "opponent")
