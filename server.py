@@ -85,7 +85,9 @@ async def websocket_endpoint(websocket: WebSocket):
                      await connected_sockets[opponent_id].send_text(json.dumps({
                           "type": "move",
                           "x": data["x"],
-                          "y": data["y"]
+                          "y": data["y"],
+                          "board":data["board"],
+                          "next_turn":data["next_turn"]
                      }))
             elif data.get("type") == "pass":
                 opponent_id = await rdb.hget(f"user:{user_id}", "opponent")
