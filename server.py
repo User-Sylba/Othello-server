@@ -145,7 +145,12 @@ async def try_match(current_id):
     # 色と先手をランダムに
     colors = ["black", "white"]
     random.shuffle(colors)
-    first_turn = "black"
+    first_turn = random.choice(["black", "white"])
+
+    user1_color = colors[0]
+    user2_color = colors[1]
+
+
 
     await rdb.hset(f"user:{user1_id}", mapping={"status": "matched", "opponent": user2_id})
     await rdb.hset(f"user:{user2_id}", mapping={"status": "matched", "opponent": user1_id})
@@ -156,13 +161,13 @@ async def try_match(current_id):
 
     await connected_sockets[user1_id].send_text(json.dumps({
         "type": "start_game",
-        "your_color": colors[0],
+        "your_color": user1_color,
         "opponent_name": user2_name,
         "first_turn": first_turn
     }))
     await connected_sockets[user2_id].send_text(json.dumps({
         "type": "start_game",
-        "your_color": colors[1],
+        "your_color": user2_color,
         "opponent_name": user1_name,
         "first_turn": first_turn
     }))
@@ -177,6 +182,7 @@ async def try_match(current_id):
     await rdb.set(f"board:{user2_id}", json.dumps(save_board), ex=40)
     await rdb.set(f"turn:{user1_id}", first_turn, ex=40)
     await rdb.set(f"turn:{user2_id}", first_turn, ex=40)
+    
 
 async def handle_disconnect(user_id):
     opponent_id = await rdb.hget(f"user:{user_id}", "opponent")
