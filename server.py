@@ -81,16 +81,18 @@ async def websocket_endpoint(websocket: WebSocket):
                  await rdb.set(f"turn:{user_id}", data["next_turn"], ex=40)
                  await rdb.set(f"turn:{opponent_id}", data["next_turn"], ex=40)
 
+                 my_color = await rdb.hget(f"user:{user_id}", "color")
+                 opponent_color = "black" if my_color == "white" else "white"
+
                  if opponent_id in connected_sockets:
                      
-                     opponent_color = "black"if data["next_turn"]=="white"else"white"
                      await connected_sockets[opponent_id].send_text(json.dumps({
                           "type": "move",
                           "x": data["x"],
                           "y": data["y"],
                           "board":data["board"],
                           "next_turn":data["next_turn"],
-                          "your_color": "black"if turn =="black"else"white"
+                          "your_color": opponent_color
                      }))
             elif data.get("type") == "pass":
                 opponent_id = await rdb.hget(f"user:{user_id}", "opponent")
@@ -156,8 +158,15 @@ async def try_match(current_id):
 
 
 
-    await rdb.hset(f"user:{user1_id}", mapping={"status": "matched", "opponent": user2_id})
-    await rdb.hset(f"user:{user2_id}", mapping={"status": "matched", "opponent": user1_id})
+    await rdb.hset(f"user:{user1_id}", mapping={
+        "status": "matched",
+        "opponent": user2_id,
+        "color":user1_color
+        })
+    await rdb.hset(f"user:{user2_id}", mapping={
+        "status": "matched", 
+        "opponent": user1_id,
+        "color": user2_color})
 
     print(f"[MATCH] {user1_id} vs {user2_id}")
 
