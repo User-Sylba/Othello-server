@@ -90,7 +90,7 @@ async def websocket_endpoint(websocket: WebSocket):
                           "y": data["y"],
                           "board":data["board"],
                           "next_turn":data["next_turn"],
-                          "your_color": opponent_color
+                          "your_color": "black"if turn =="black"else"white"
                      }))
             elif data.get("type") == "pass":
                 opponent_id = await rdb.hget(f"user:{user_id}", "opponent")
