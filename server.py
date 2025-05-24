@@ -82,12 +82,15 @@ async def websocket_endpoint(websocket: WebSocket):
                  await rdb.set(f"turn:{opponent_id}", data["next_turn"], ex=40)
 
                  if opponent_id in connected_sockets:
+                     
+                     opponent_color = "black"if data["next_turn"]=="white"else"white"
                      await connected_sockets[opponent_id].send_text(json.dumps({
                           "type": "move",
                           "x": data["x"],
                           "y": data["y"],
                           "board":data["board"],
-                          "next_turn":data["next_turn"]
+                          "next_turn":data["next_turn"],
+                          "your_color": opponent_color
                      }))
             elif data.get("type") == "pass":
                 opponent_id = await rdb.hget(f"user:{user_id}", "opponent")
@@ -146,6 +149,7 @@ async def try_match(current_id):
     colors = ["black", "white"]
     random.shuffle(colors)
     first_turn = random.choice(["black", "white"])
+    first_turn = colors[0]
 
     user1_color = colors[0]
     user2_color = colors[1]
