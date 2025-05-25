@@ -139,37 +139,37 @@ async def try_match(current_id):
     if len(waiting_users) < 2:
         return
 
-    user1_id = current_id
-    user2_id = next((uid for uid in waiting_users if uid != user1_id), None)
-    if not user2_id:
+    # 2人をランダムに選ぶ
+    candidates = [uid for uid in waiting_users if uid != current_id]
+    if not candidates:
         return
+    
+    opponent_id = random.choice(candidates)
+    user_ids = [current_id, opponent_id]
+    random.shuffle(user_ids)
+    user1_id, user2_id = user_ids[0], user_ids[1]
 
     user1_name = await rdb.hget(f"user:{user1_id}", "name")
     user2_name = await rdb.hget(f"user:{user2_id}", "name")
 
-    # 色と先手をランダムに
     colors = ["black", "white"]
     random.shuffle(colors)
-    
-
     user1_color = colors[0]
     user2_color = colors[1]
-
     first_turn = user1_color
-
-
 
     await rdb.hset(f"user:{user1_id}", mapping={
         "status": "matched",
         "opponent": user2_id,
-        "color":user1_color
-        })
+        "color": user1_color
+    })
     await rdb.hset(f"user:{user2_id}", mapping={
-        "status": "matched", 
+        "status": "matched",
         "opponent": user1_id,
-        "color": user2_color})
+        "color": user2_color
+    })
 
-    print(f"[MATCH] {user1_id} vs {user2_id}")
+    print(f"[MATCH] {user1_id} ({user1_color}) vs {user2_id} ({user2_color})")
 
     await asyncio.sleep(2.0)
 
@@ -185,7 +185,8 @@ async def try_match(current_id):
         "opponent_name": user1_name,
         "first_turn": first_turn
     }))
-    save_board = [[0]*8 for _ in range(8)]
+
+    save_board = [[0] * 8 for _ in range(8)]
     mid = 4
     save_board[mid - 1][mid - 1] = -1
     save_board[mid][mid] = -1
@@ -196,7 +197,6 @@ async def try_match(current_id):
     await rdb.set(f"board:{user2_id}", json.dumps(save_board), ex=40)
     await rdb.set(f"turn:{user1_id}", first_turn, ex=40)
     await rdb.set(f"turn:{user2_id}", first_turn, ex=40)
-    
 
 async def handle_disconnect(user_id):
     opponent_id = await rdb.hget(f"user:{user_id}", "opponent")
