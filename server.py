@@ -150,11 +150,12 @@ async def try_match(current_id):
     # 色と先手をランダムに
     colors = ["black", "white"]
     random.shuffle(colors)
-    first_turn = random.choice(["black", "white"])
-    first_turn = colors[0]
+    
 
     user1_color = colors[0]
     user2_color = colors[1]
+
+    first_turn = user1_color
 
 
 
