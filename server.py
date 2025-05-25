@@ -38,12 +38,14 @@ async def websocket_endpoint(websocket: WebSocket):
 
         board_data = await rdb.get(f"board:{user_id}")
         turn = await rdb.get(f"turn:{user_id}")
+        color = await rdb.hget(f"user:{user_id}", "color")
 
         if board_data and turn:
             await websocket.send_text(json.dumps({
                 "type": "restore_board",
                 "board": json.loads(board_data),
-                "current_player": turn
+                "current_player": turn,
+                "your_color": color
             }))
 
         await rdb.hset(f"user:{user_id}", mapping={
