@@ -92,7 +92,7 @@ async def websocket_endpoint(websocket: WebSocket):
                           "y": data["y"],
                           "board":data["board"],
                           "next_turn":data["next_turn"],
-                          "your_color":data["your_color"]
+                          "your_color":opponent_color
                           
                      }))
             elif data.get("type") == "pass":
