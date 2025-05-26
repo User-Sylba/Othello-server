@@ -69,12 +69,18 @@ async def websocket_endpoint(websocket: WebSocket):
             data = json.loads(message)
 
             if data.get("type") == "register":
-                await rdb.hset(f"user:{user_id}", mapping={
-                    "name": name,
-                    "status": "waiting"
-                })
-                asyncio.create_task(try_match(user_id))
+                current_status = await rdb.hget(f"user:{user_id}", "status")
 
+                if current_status == "matched":
+                     print(f"[INFO] {user_id} はすでにマッチ済みのため register を無視")
+                     continue  # registerを無視して次へ
+
+                await rdb.hset(f"user:{user_id}", mapping={
+                     "name": name,
+                     "status": "waiting"
+                    })
+                asyncio.create_task(try_match(user_id))
+                
             elif data.get("type") == "move":
                  opponent_id = await rdb.hget(f"user:{user_id}", "opponent")
 
