@@ -72,13 +72,28 @@ async def websocket_endpoint(websocket: WebSocket):
                 current_status = await rdb.hget(f"user:{user_id}", "status")
 
                 if current_status == "matched":
-                     print(f"[INFO] {user_id} はすでにマッチ済みのため register を無視")
-                     continue  # registerを無視して次へ
+                    print(f"[INFO] 再接続ユーザー: {user_id}")
+        
+        # 再接続時は盤面と状態を復元して送信
+                    board = await rdb.get(f"board:{user_id}")
+                    turn = await rdb.get(f"turn:{user_id}")
+                    color = await rdb.hget(f"user:{user_id}", "color")
+        
+                    if board and turn:
+                        await websocket.send_text(json.dumps({
+                            "type": "restore_board",
+                            "board": json.loads(board),
+                            "current_player": turn,
+                            "your_color": color
+            }))
+        
+                    continue  # registerを無視（try_matchは呼ばない）
 
+    # 通常の新規マッチング登録
                 await rdb.hset(f"user:{user_id}", mapping={
-                     "name": name,
-                     "status": "waiting"
-                    })
+                    "name": name,
+                    "status": "waiting"
+                })
                 asyncio.create_task(try_match(user_id))
                 
             elif data.get("type") == "move":
