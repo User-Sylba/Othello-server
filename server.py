@@ -47,11 +47,12 @@ async def websocket_endpoint(websocket: WebSocket):
                 "current_player": turn,
                 "your_color": color
             }))
-
-        await rdb.hset(f"user:{user_id}", mapping={
-            "name": name,
-            "status": "waiting",
-            "opponent": ""
+        existing_status = await rdb.hget(f"user:{user_id}","status")
+        if existing_status is None:
+            await rdb.hset(f"user:{user_id}", mapping={
+                "name": name,
+                "status": "waiting",
+                "opponent": ""
         })
         connected_sockets[user_id] = websocket
 
