@@ -86,7 +86,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             "current_player": turn,
                             "your_color": color
             }))
-        
+                    print(f"[SEND] restore_board sent to {user_id}")
                     continue  # registerを無視（try_matchは呼ばない）
 
     # 通常の新規マッチング登録
