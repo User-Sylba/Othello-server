@@ -69,6 +69,29 @@ async def websocket_endpoint(websocket: WebSocket):
             message = await websocket.receive_text()
             data = json.loads(message)
 
+            if data.get("type") == "restore_request":
+                user_id = data.get("user_id")
+                print(f"[RESTORE_REQUEST] from user_id: {user_id}")
+            
+                board_data = await rdb.get(f"board:{user_id}")
+                turn = await rdb.get(f"turn:{user_id}")
+                color = await rdb.hget(f"user:{user_id}", "color")
+
+                if board_data and turn and color:
+                    await websocket.send_text(json.dumps({
+                        "type": "restore_board",
+                        "board": json.loads(board_data),
+                        "current_player": turn,
+                        "your_color": color
+                    }))
+                    print(f"[RESTORE] Sent restore_board to {user_id}")
+                else:
+                    await websocket.send_text(json.dumps({
+                        "type": "error",
+                        "message": "再接続用の盤面データが見つかりませんでした"
+                    }))
+                continue 
+
             if data.get("type") == "register":
                 current_status = await rdb.hget(f"user:{user_id}", "status")
 
