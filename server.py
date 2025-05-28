@@ -79,6 +79,17 @@ async def websocket_endpoint(websocket: WebSocket):
                     board = await rdb.get(f"board:{user_id}")
                     turn = await rdb.get(f"turn:{user_id}")
                     color = await rdb.hget(f"user:{user_id}", "color")
+
+                    if not color:
+                        opponent_id = await rdb.hget(f"user:{user_id}", "opponent")
+                        if opponent_id:
+                            opponent_color = await rdb.hget(f"user:{opponent_id}", "color")
+                            if opponent_color == "black":
+                                color = "white"
+                            elif opponent_color == "white":
+                                color = "black"
+                        if color:
+                            await rdb.hset(f"user:{user_id}", "color", color)
         
                     if board and turn:
                         await websocket.send_text(json.dumps({
@@ -87,8 +98,10 @@ async def websocket_endpoint(websocket: WebSocket):
                             "current_player": turn,
                             "your_color": color
             }))
-                    print(f"[SEND] restore_board sent to {user_id}")
-                    continue  # registerを無視（try_matchは呼ばない）
+                        print(f"[SEND] restore_board sent to {user_id}")
+                    else:
+                        print(f"[WARN] 再接続データ不完全: board={board}, turn={turn}, color={color}")
+                    continue
 
     # 通常の新規マッチング登録
                 await rdb.hset(f"user:{user_id}", mapping={
