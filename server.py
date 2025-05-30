@@ -111,10 +111,9 @@ async def websocket_endpoint(websocket: WebSocket):
                                 color = "white"
                             elif opponent_color == "white":
                                 color = "black"
-                        if color:
                             await rdb.hset(f"user:{user_id}", "color", color)
         
-                    if board and turn:
+                    if board and turn and color:
                         await websocket.send_text(json.dumps({
                             "type": "restore_board",
                             "board": json.loads(board),
@@ -124,7 +123,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         print(f"[SEND] restore_board sent to {user_id}")
                     else:
                         print(f"[WARN] 再接続データ不完全: board={board}, turn={turn}, color={color}")
-                    continue
+                    return
 
     # 通常の新規マッチング登録
                 await rdb.hset(f"user:{user_id}", mapping={
