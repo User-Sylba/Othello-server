@@ -138,7 +138,7 @@ async def websocket_endpoint(websocket: WebSocket):
     # 現在のターンを取得
                 current_turn = await rdb.get(f"turn:{user_id}")
                 if not current_turn:
-                    current_turn = "black"  # fallback
+                    current_turn = "black"  
     
     # サーバー側でターンを反転！
                 next_turn = "white" if current_turn == "black" else "black"
@@ -165,6 +165,14 @@ async def websocket_endpoint(websocket: WebSocket):
                         "next_turn": next_turn,
                         "your_color": opponent_color
                     }))
+                if user_id in connected_sockets:
+                    await connected_sockets[user_id].send_text(json.dumps({
+                        "type": "move",
+                        "x": data["x"],
+                        "y": data["y"],
+                        "board": data["board"],
+                        "next_turn": next_turn,
+                        "your_color": my_color  
             elif data.get("type") == "pass":
                 opponent_id = await rdb.hget(f"user:{user_id}", "opponent")
 
