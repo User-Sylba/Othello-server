@@ -163,6 +163,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         "y": data["y"],
                         "board": data["board"],
                         "next_turn": next_turn,
+                        "your_turn":(next_turn == my_color)
                         
                     }))
                 if user_id in connected_sockets:
