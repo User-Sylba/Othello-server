@@ -133,55 +133,77 @@ async def websocket_endpoint(websocket: WebSocket):
                 asyncio.create_task(try_match(user_id))
                 
             elif data.get("type") == "move":
-                 opponent_id = await rdb.hget(f"user:{user_id}", "opponent")
+                opponent_id = await rdb.hget(f"user:{user_id}", "opponent")
 
-                 await rdb.set(f"board:{user_id}", json.dumps(data["board"]), ex=40)
-                 await rdb.set(f"board:{opponent_id}", json.dumps(data["board"]), ex=40)
-                 await rdb.set(f"turn:{user_id}", data["next_turn"], ex=40)
-                 await rdb.set(f"turn:{opponent_id}", data["next_turn"], ex=40)
+    # 現在のターンを取得
+                current_turn = await rdb.get(f"turn:{user_id}")
+                if not current_turn:
+                    current_turn = "black"  # fallback
+    
+    # サーバー側でターンを反転！
+                next_turn = "white" if current_turn == "black" else "black"
 
-                 my_color = await rdb.hget(f"user:{user_id}", "color")
-                 opponent_color = "black" if my_color == "white" else "white"
+    # board保存
+                await rdb.set(f"board:{user_id}", json.dumps(data["board"]), ex=40)
+                await rdb.set(f"board:{opponent_id}", json.dumps(data["board"]), ex=40)
 
-                 if opponent_id in connected_sockets:
-                     
-                     await connected_sockets[opponent_id].send_text(json.dumps({
-                          "type": "move",
-                          "x": data["x"],
-                          "y": data["y"],
-                          "board":data["board"],
-                          "next_turn":data["next_turn"],
-                          "your_color":opponent_color
-                          
-                     }))
+    # ターン保存
+                await rdb.set(f"turn:{user_id}", next_turn, ex=40)
+                await rdb.set(f"turn:{opponent_id}", next_turn, ex=40)
+
+    # 相手の色
+                my_color = await rdb.hget(f"user:{user_id}", "color")
+                opponent_color = "black" if my_color == "white" else "white"
+
+    # 相手に送信
+                if opponent_id in connected_sockets:
+                    await connected_sockets[opponent_id].send_text(json.dumps({
+                        "type": "move",
+                        "x": data["x"],
+                        "y": data["y"],
+                        "board": data["board"],
+                        "next_turn": next_turn,
+                        "your_color": opponent_color
+                    }))
             elif data.get("type") == "pass":
                 opponent_id = await rdb.hget(f"user:{user_id}", "opponent")
 
-    # 現在の盤面とターン情報を保存
+                current_turn = await rdb.get(f"turn:{user_id}")
+                next_turn = "white" if current_turn == "black" else "black"
+
                 await rdb.set(f"board:{user_id}", json.dumps(data["board"]), ex=40)
                 await rdb.set(f"board:{opponent_id}", json.dumps(data["board"]), ex=40)
-                await rdb.set(f"turn:{user_id}", data["next_turn"], ex=40)
-                await rdb.set(f"turn:{opponent_id}", data["next_turn"], ex=40)
+                await rdb.set(f"turn:{user_id}", next_turn, ex=40)
+                await rdb.set(f"turn:{opponent_id}", next_turn, ex=40)
 
                 if opponent_id in connected_sockets:
-                     await connected_sockets[opponent_id].send_text(json.dumps({
-                     "type": "pass"
-                     }))
+                    await connected_sockets[opponent_id].send_text(json.dumps({
+                        "type": "pass",
+                        "next_turn": next_turn
+                    }))
             elif data.get("type") == "end_game":
                 opponent_id = await rdb.hget(f"user:{user_id}", "opponent")
 
-    
-                await rdb.delete(f"board:{user_id}")
-                await rdb.delete(f"board:{opponent_id}")
-                await rdb.delete(f"turn:{user_id}")
-                await rdb.delete(f"turn:{opponent_id}")
+    # 再接続用に残す：有効期限をリセット
+                await rdb.expire(f"board:{user_id}", 40)
+                await rdb.expire(f"board:{opponent_id}", 40)
+                await rdb.expire(f"turn:{user_id}", 40)
+                await rdb.expire(f"turn:{opponent_id}", 40)
 
-    
+    # 状態は waiting に戻す（再マッチ or 自主切断用）
+                await rdb.hset(f"user:{user_id}", mapping={
+                    "status": "waiting",
+                    "opponent": ""
+                })
+                await rdb.hset(f"user:{opponent_id}", mapping={
+                    "status": "waiting",
+                    "opponent": ""
+                })
+
                 if opponent_id in connected_sockets:
-                     await connected_sockets[opponent_id].send_text(json.dumps({
-                    "type": "end_game"
-                     }))
-
+                    await connected_sockets[opponent_id].send_text(json.dumps({
+                        "type": "end_game"
+                    }))
 
     except WebSocketDisconnect:
         logging.info(f"[DISCONNECT] {user_id} が切断されました")
@@ -260,7 +282,12 @@ async def try_match(current_id):
 
 async def handle_disconnect(user_id):
     opponent_id = await rdb.hget(f"user:{user_id}", "opponent")
-    await rdb.delete(f"user:{user_id}")
+
+    # userデータを完全には消さず、40秒だけ保持
+    await rdb.expire(f"user:{user_id}", 40)
+    await rdb.expire(f"board:{user_id}", 40)
+    await rdb.expire(f"turn:{user_id}", 40)
+
     connected_sockets.pop(user_id, None)
 
     if opponent_id and opponent_id in connected_sockets:
@@ -268,9 +295,10 @@ async def handle_disconnect(user_id):
             await connected_sockets[opponent_id].send_text(json.dumps({
                 "type": "opponent_disconnected"
             }))
-            await rdb.hset(f"user:{opponent_id}", mapping={
-                "status": "waiting",
-                "opponent": ""
-            })
         except:
             pass
+
+        # 対戦相手も40秒後にクリーンアップできるように更新
+        await rdb.expire(f"user:{opponent_id}", 40)
+        await rdb.expire(f"board:{opponent_id}", 40)
+        await rdb.expire(f"turn:{opponent_id}", 40)
