@@ -36,6 +36,8 @@ async def websocket_endpoint(websocket: WebSocket):
         name = init_data.get("name")
         print(f"[INIT] user_id:{user_id}, name:{name}")
 
+        connected_sockets[user_id] = websocket
+
         board_data = await rdb.get(f"board:{user_id}")
         turn = await rdb.get(f"turn:{user_id}")
         color = await rdb.hget(f"user:{user_id}", "color")
@@ -47,6 +49,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 "current_player": turn,
                 "your_color": color
             }))
+        
+
         existing_status = await rdb.hget(f"user:{user_id}","status")
         if existing_status is None:
             await rdb.hset(f"user:{user_id}", mapping={
@@ -54,8 +58,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 "status": "waiting",
                 "opponent": ""
         })
-        connected_sockets[user_id] = websocket
-
+        
         # 再接続時の通知
         opponent_id = await rdb.hget(f"user:{user_id}", "opponent")
         if opponent_id:
@@ -93,6 +96,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 continue 
 
             if data.get("type") == "register":
+                
                 current_status = await rdb.hget(f"user:{user_id}", "status")
 
                 if current_status == "matched":
@@ -163,6 +167,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         "y": data["y"],
                         "board": data["board"],
                         "next_turn": next_turn,
+                        "your_color": my_color,
                         "your_turn":(next_turn == my_color)
                         
                     }))
