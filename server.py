@@ -8,7 +8,6 @@ import redis.asyncio as redis
 import os
 from dotenv import load_dotenv
 
-
 load_dotenv()  # .env を読み込む
 
 redis_url = os.getenv("REDIS_URL")
@@ -42,7 +41,7 @@ async def websocket_endpoint(websocket: WebSocket):
         turn = await rdb.get(f"turn:{user_id}")
         color = await rdb.hget(f"user:{user_id}", "color")
 
-        if board_data and turn:
+        if board_data and turn and color:
             await websocket.send_text(json.dumps({
                 "type": "restore_board",
                 "board": json.loads(board_data),
@@ -64,9 +63,12 @@ async def websocket_endpoint(websocket: WebSocket):
         if opponent_id:
             opponent_socket = connected_sockets.get(opponent_id)
             if opponent_socket:
-                await opponent_socket.send_text(json.dumps({
-                    "type": "opponent_reconnected"
-                }))
+                try:
+                    await opponent_socket.send_text(json.dumps({
+                        "type": "opponent_reconnected"
+                    }))
+                except Exception as e:
+                    logging.warning(f"[WARN] opponent_reconnected の送信失敗: {e}")
 
         while True:
             message = await websocket.receive_text()
@@ -96,7 +98,6 @@ async def websocket_endpoint(websocket: WebSocket):
                 continue 
 
             if data.get("type") == "register":
-                
                 current_status = await rdb.hget(f"user:{user_id}", "status")
 
                 if current_status == "matched":
@@ -127,7 +128,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         print(f"[SEND] restore_board sent to {user_id}")
                     else:
                         print(f"[WARN] 再接続データ不完全: board={board}, turn={turn}, color={color}")
-                    return
+                    
 
     # 通常の新規マッチング登録
                 await rdb.hset(f"user:{user_id}", mapping={
@@ -161,30 +162,54 @@ async def websocket_endpoint(websocket: WebSocket):
 
     # 相手に送信
                 if opponent_id in connected_sockets:
-                    await connected_sockets[opponent_id].send_text(json.dumps({
-                        "type": "move",
-                        "x": data["x"],
-                        "y": data["y"],
-                        "board": data["board"],
-                        "next_turn": next_turn,
-                        "your_color": my_color,
-                        "your_turn":(next_turn == my_color)
-                        
-                    }))
+                    try:
+                        await connected_sockets[opponent_id].send_text(json.dumps({
+                            "type": "move",
+                            "x": data["x"],
+                            "y": data["y"],
+                            "board": data["board"],
+                            "next_turn": next_turn,
+                            "your_color": opponent_color,
+                            "your_turn":(next_turn == opponent_color)
+                        }))
+                    except Exception as e:
+                        logging.warning(f"[WARN] user への move 送信失敗: {e}")
                 if user_id in connected_sockets:
-                    await connected_sockets[user_id].send_text(json.dumps({
-                        "type": "move",
-                        "x": data["x"],
-                        "y": data["y"],
-                        "board": data["board"],
-                        "next_turn": next_turn,
-                        "your_color": my_color 
-                    })) 
+                    try:
+                        await connected_sockets[user_id].send_text(json.dumps({
+                            "type": "move",
+                            "x": data["x"],
+                            "y": data["y"],
+                            "board": data["board"],
+                            "next_turn": next_turn,
+                            "your_color": my_color,
+                            "your_turn":(next_turn == my_color)
+                        })) 
+                    except Exception as e:
+                        logging.warning(f"[WARN] opponent への move 送信失敗: {e}")
+
             elif data.get("type") == "pass":
                 opponent_id = await rdb.hget(f"user:{user_id}", "opponent")
 
+                pass_pass = await rdb.get(f"pass:{user_id}")
+                if pass_pass == "true":
+                
+                    if opponent_id in connected_sockets:
+                        await connected_sockets[opponent_id].send_text(json.dumps({
+                            "type": "end_game"
+                        }))
+                    await websocket.send_text(json.dumps({
+                        "type": "end_game"
+                    }))
+                    return
+                else:
+                
+                    await rdb.set(f"pass:{user_id}", "true", ex=40)
+                    await rdb.set(f"pass:{opponent_id}", "false", ex=40)
+
                 current_turn = await rdb.get(f"turn:{user_id}")
                 next_turn = "white" if current_turn == "black" else "black"
+                opponent_color = await rdb.hget(f"user:{opponent_id}", "color")
 
                 await rdb.set(f"board:{user_id}", json.dumps(data["board"]), ex=40)
                 await rdb.set(f"board:{opponent_id}", json.dumps(data["board"]), ex=40)
@@ -194,8 +219,12 @@ async def websocket_endpoint(websocket: WebSocket):
                 if opponent_id in connected_sockets:
                     await connected_sockets[opponent_id].send_text(json.dumps({
                         "type": "pass",
-                        "next_turn": next_turn
+                        "next_turn": next_turn,
+                        "your_color":opponent_color,
+                        "your_turn":(next_turn == opponent_color)
                     }))
+
+
             elif data.get("type") == "end_game":
                 opponent_id = await rdb.hget(f"user:{user_id}", "opponent")
 
@@ -215,10 +244,36 @@ async def websocket_endpoint(websocket: WebSocket):
                     "opponent": ""
                 })
 
+                board = await rdb.get(f"board:{user_id}")
+                turn = await rdb.get(f"turn:{user_id}")
+                my_color = await rdb.hget(f"user:{user_id}", "color")
+                opponent_color = "black" if my_color == "white" else "white"
+
+                # 自分に送信
+                if user_id in connected_sockets:
+                    try:
+                        await connected_sockets[user_id].send_text(json.dumps({
+                            "type": "end_game",
+                            "board": json.loads(board),
+                            "current_player": turn,
+                            "your_color": my_color
+                        }))
+                    except Exception as e:
+                         logging.warning(f"[WARN] user への end_game 送信失敗: {e}")
+
+                # 相手に送信
                 if opponent_id in connected_sockets:
-                    await connected_sockets[opponent_id].send_text(json.dumps({
-                        "type": "end_game"
-                    }))
+                    try:
+                        await connected_sockets[opponent_id].send_text(json.dumps({
+                            "type": "end_game",
+                            "board": json.loads(board),
+                            "current_player": turn,
+                            "your_color": opponent_color
+                        }))
+                    except Exception as e:
+                        logging.warning(f"[WARN] opponent への end_game 送信失敗: {e}")
+
+                
 
     except WebSocketDisconnect:
         logging.info(f"[DISCONNECT] {user_id} が切断されました")
@@ -251,9 +306,9 @@ async def try_match(current_id):
 
     colors = ["black", "white"]
     random.shuffle(colors)
-    user1_color = colors[0]
-    user2_color = colors[1]
-    first_turn = user1_color
+    user1_color = "black"
+    user2_color = "white"
+    first_turn = "black"
 
     await rdb.hset(f"user:{user1_id}", mapping={
         "status": "matched",
