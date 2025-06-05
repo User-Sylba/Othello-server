@@ -45,7 +45,7 @@ async def websocket_endpoint(websocket: WebSocket):
             await websocket.send_text(json.dumps({
                 "type": "restore_board",
                 "board": json.loads(board_data),
-                "current_player": turn,
+                "current_player": 1 if turn == "black" else -1,
                 "your_color": color
             }))
         
@@ -86,7 +86,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     await websocket.send_text(json.dumps({
                         "type": "restore_board",
                         "board": json.loads(board_data),
-                        "current_player": turn,
+                        "current_player": 1 if turn == "black" else -1,
                         "your_color": color
                     }))
                     print(f"[RESTORE] Sent restore_board to {user_id}")
@@ -122,7 +122,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         await websocket.send_text(json.dumps({
                             "type": "restore_board",
                             "board": json.loads(board),
-                            "current_player": turn,
+                            "current_player": 1 if turn == "black" else -1,
                             "your_color": color
             }))
                         print(f"[SEND] restore_board sent to {user_id}")
@@ -255,7 +255,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         await connected_sockets[user_id].send_text(json.dumps({
                             "type": "end_game",
                             "board": json.loads(board),
-                            "current_player": turn,
+                            "current_player": 1 if turn == "black" else -1,
                             "your_color": my_color
                         }))
                     except Exception as e:
@@ -267,7 +267,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         await connected_sockets[opponent_id].send_text(json.dumps({
                             "type": "end_game",
                             "board": json.loads(board),
-                            "current_player": turn,
+                            "current_player": 1 if turn == "black" else -1,
                             "your_color": opponent_color
                         }))
                     except Exception as e:
