@@ -138,140 +138,158 @@ async def websocket_endpoint(websocket: WebSocket):
                 asyncio.create_task(try_match(user_id))
                 
             elif data.get("type") == "move":
+                x = data["x"]
+                y = data["y"]
+
                 opponent_id = await rdb.hget(f"user:{user_id}", "opponent")
-
-    # 現在のターンを取得
-                current_turn = await rdb.get(f"turn:{user_id}")
-                if not current_turn:
-                    current_turn = "black"  
-    
-    # サーバー側でターンを反転！
-                next_turn = "white" if current_turn == "black" else "black"
-
-    # board保存
-                await rdb.set(f"board:{user_id}", json.dumps(data["board"]), ex=40)
-                await rdb.set(f"board:{opponent_id}", json.dumps(data["board"]), ex=40)
-
-    # ターン保存
-                await rdb.set(f"turn:{user_id}", next_turn, ex=40)
-                await rdb.set(f"turn:{opponent_id}", next_turn, ex=40)
-
-    # 相手の色
                 my_color = await rdb.hget(f"user:{user_id}", "color")
                 opponent_color = "black" if my_color == "white" else "white"
 
-    # 相手に送信
-                if opponent_id in connected_sockets:
-                    try:
-                        await connected_sockets[opponent_id].send_text(json.dumps({
+    # 現在の board を取得し、反転処理
+                board_data = await rdb.get(f"board:{user_id}")
+                board = json.loads(board_data) if board_data else [[0]*8 for _ in range(8)]
+                color_value = 1 if my_color == "black" else -1
+
+    # 石を置いて、反転処理を実行
+                def place_stone(board, x, y, color):
+                    directions = [(-1, -1), (-1, 0), (-1, 1),
+                                  (0, -1),          (0, 1),
+                                  (1, -1),  (1, 0), (1, 1)]
+                    flipped = []
+
+                    if board[x][y] != 0:
+                        return board  # 無効な位置
+
+                    board[x][y] = color
+                    for dx, dy in directions:
+                        nx, ny = x + dx, y + dy
+                        temp = []
+                        while 0 <= nx < 8 and 0 <= ny < 8 and board[nx][ny] == -color:
+                            temp.append((nx, ny))
+                            nx += dx
+                            ny += dy
+                        if 0 <= nx < 8 and 0 <= ny < 8 and board[nx][ny] == color:
+                            for fx, fy in temp:
+                                board[fx][fy] = color
+                                flipped.append((fx, fy))
+                    return board
+
+                board = place_stone(board, x, y, color_value)
+
+    # 次のターンを決定
+                current_turn = await rdb.get(f"turn:{user_id}")
+                if not current_turn:
+                    current_turn = "black"
+                next_turn = "white" if current_turn == "black" else "black"
+
+    # Redisに保存（再接続対応）
+                await rdb.set(f"board:{user_id}", json.dumps(board), ex=40)
+                await rdb.set(f"board:{opponent_id}", json.dumps(board), ex=40)
+                await rdb.set(f"turn:{user_id}", next_turn, ex=40)
+                await rdb.set(f"turn:{opponent_id}", next_turn, ex=40)
+
+    # 両者に座標と色、次のターンを通知（board は送らない）
+                for uid, color, socket in [
+                    (user_id, my_color, connected_sockets.get(user_id)),
+                    (opponent_id, opponent_color, connected_sockets.get(opponent_id))
+                ]:
+                    if socket:
+                        await socket.send_text(json.dumps({
                             "type": "move",
-                            "x": data["x"],
-                            "y": data["y"],
-                            "board": data["board"],
+                            "x": x,
+                            "y": y,
+                            "color": my_color,  # どの色が置かれたか
                             "next_turn": next_turn,
-                            "your_color": opponent_color,
-                            "your_turn":(next_turn == opponent_color)
+                            "your_color": color,
+                            "your_turn": (next_turn == color)
                         }))
-                    except Exception as e:
-                        logging.warning(f"[WARN] user への move 送信失敗: {e}")
-                if user_id in connected_sockets:
-                    try:
-                        await connected_sockets[user_id].send_text(json.dumps({
-                            "type": "move",
-                            "x": data["x"],
-                            "y": data["y"],
-                            "board": data["board"],
-                            "next_turn": next_turn,
-                            "your_color": my_color,
-                            "your_turn":(next_turn == my_color)
-                        })) 
-                    except Exception as e:
-                        logging.warning(f"[WARN] opponent への move 送信失敗: {e}")
 
             elif data.get("type") == "pass":
                 opponent_id = await rdb.hget(f"user:{user_id}", "opponent")
 
-                pass_pass = await rdb.get(f"pass:{user_id}")
-                if pass_pass == "true":
-                
+    # 現在の board を取得
+                board_data = await rdb.get(f"board:{user_id}")
+                board = json.loads(board_data) if board_data else [[0]*8 for _ in range(8)]
+
+    # パス回数記録
+                already_passed = await rdb.get(f"pass:{user_id}")
+                if already_passed == "true":
+        # 連続パス → ゲーム終了
                     if opponent_id in connected_sockets:
                         await connected_sockets[opponent_id].send_text(json.dumps({
-                            "type": "end_game"
+                            "type": "end_game",
+                            "board": board,
                         }))
-                    await websocket.send_text(json.dumps({
-                        "type": "end_game"
-                    }))
+                    if user_id in connected_sockets:
+                        await connected_sockets[user_id].send_text(json.dumps({
+                            "type": "end_game",
+                            "board": board,
+                        }))
                     return
                 else:
-                
+        # 自分はパス → 相手のパス状態リセット
                     await rdb.set(f"pass:{user_id}", "true", ex=40)
                     await rdb.set(f"pass:{opponent_id}", "false", ex=40)
 
+    # 現在のターンを取得
                 current_turn = await rdb.get(f"turn:{user_id}")
+                if not current_turn:
+                    current_turn = "black"
                 next_turn = "white" if current_turn == "black" else "black"
-                opponent_color = await rdb.hget(f"user:{opponent_id}", "color")
 
-                await rdb.set(f"board:{user_id}", json.dumps(data["board"]), ex=40)
-                await rdb.set(f"board:{opponent_id}", json.dumps(data["board"]), ex=40)
+    # board と turn を Redis に保存（再接続用）
+                await rdb.set(f"board:{user_id}", json.dumps(board), ex=40)
+                await rdb.set(f"board:{opponent_id}", json.dumps(board), ex=40)
                 await rdb.set(f"turn:{user_id}", next_turn, ex=40)
                 await rdb.set(f"turn:{opponent_id}", next_turn, ex=40)
 
+    # 相手の色
+                opponent_color = await rdb.hget(f"user:{opponent_id}", "color")
+
+    # 相手にパス通知
                 if opponent_id in connected_sockets:
                     await connected_sockets[opponent_id].send_text(json.dumps({
                         "type": "pass",
                         "next_turn": next_turn,
-                        "your_color":opponent_color,
-                        "your_turn":(next_turn == opponent_color)
+                        "your_color": opponent_color,
+                        "your_turn": (next_turn == opponent_color)
                     }))
-
 
             elif data.get("type") == "end_game":
                 opponent_id = await rdb.hget(f"user:{user_id}", "opponent")
 
-    # 再接続用に残す：有効期限をリセット
+    # 再接続用に有効期限を延長
                 await rdb.expire(f"board:{user_id}", 40)
                 await rdb.expire(f"board:{opponent_id}", 40)
                 await rdb.expire(f"turn:{user_id}", 40)
                 await rdb.expire(f"turn:{opponent_id}", 40)
 
-    # 状態は waiting に戻す（再マッチ or 自主切断用）
-                await rdb.hset(f"user:{user_id}", mapping={
-                    "status": "waiting",
-                    "opponent": ""
-                })
-                await rdb.hset(f"user:{opponent_id}", mapping={
-                    "status": "waiting",
-                    "opponent": ""
-                })
-
-                board = await rdb.get(f"board:{user_id}")
+    # Redisから取得（受信ではなく）
+                board_data = await rdb.get(f"board:{user_id}")
                 turn = await rdb.get(f"turn:{user_id}")
+                board = json.loads(board_data) if board_data else [[0]*8 for _ in range(8)]
+
                 my_color = await rdb.hget(f"user:{user_id}", "color")
                 opponent_color = "black" if my_color == "white" else "white"
 
-                # 自分に送信
-                if user_id in connected_sockets:
-                    try:
-                        await connected_sockets[user_id].send_text(json.dumps({
-                            "type": "end_game",
-                            "board": json.loads(board),
-                            "current_player": 1 if turn == "black" else -1,
-                            "your_color": my_color
-                        }))
-                    except Exception as e:
-                         logging.warning(f"[WARN] user への end_game 送信失敗: {e}")
+    # 状態を waiting に戻す
+                await rdb.hset(f"user:{user_id}", mapping={"status": "waiting", "opponent": ""})
+                await rdb.hset(f"user:{opponent_id}", mapping={"status": "waiting", "opponent": ""})
 
-                # 相手に送信
-                if opponent_id in connected_sockets:
-                    try:
-                        await connected_sockets[opponent_id].send_text(json.dumps({
-                            "type": "end_game",
-                            "board": json.loads(board),
-                            "current_player": 1 if turn == "black" else -1,
-                            "your_color": opponent_color
-                        }))
-                    except Exception as e:
-                        logging.warning(f"[WARN] opponent への end_game 送信失敗: {e}")
+                for uid, color, socket in [
+                     (user_id, my_color, connected_sockets.get(user_id)),
+                     (opponent_id, opponent_color, connected_sockets.get(opponent_id))
+                ]:
+                    if socket:
+                        try:
+                            await socket.send_text(json.dumps({
+                                "type": "end_game",
+                                "board": board,
+                                "current_player": 1 if turn == "black" else -1,
+                                "your_color": color
+                            }))
+                        except Exception as e:
+                            logging.warning(f"[WARN] end_game 送信失敗: {e}")
 
                 
 
