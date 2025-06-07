@@ -89,13 +89,15 @@ async def websocket_endpoint(websocket: WebSocket):
                 print(f"[RESTORE] connected_sockets.keys()={list(connected_sockets.keys())}")
 
                 if board_data and turn and color:
-        # 復元対象クライアントへ盤面情報を送信
+                    opponent_name = await rdb.hget(f"user:{user_id}", "opponent_name")
+        
                     await websocket.send_text(json.dumps({
                         "type": "restore_board",
                         "board": json.loads(board_data),
                         "current_player": 1 if turn == "black" else -1,
                         "your_color": color,
-                        "your_turn":(turn == color)
+                        "your_turn":(turn == color),
+                        "opponent_name": opponent_name
                     }))
                     print(f"[RESTORE] Sent restore_board to {user_id}")
 
