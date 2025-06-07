@@ -74,12 +74,9 @@ async def websocket_endpoint(websocket: WebSocket):
             message = await websocket.receive_text()
             data = json.loads(message)
 
-            if data.get("type") == "restore_request":
-                
-                user_id = data.get("user_id")
-                
+            if data.get("type") == "restore_request":    
+                user_id = data.get("user_id") 
                 print(f"[RESTORE_REQUEST] from user_id: {user_id}")
-
                 connected_sockets[user_id] = websocket
     
                 board_data = await rdb.get(f"board:{user_id}")
@@ -122,7 +119,7 @@ async def websocket_endpoint(websocket: WebSocket):
                                     "board": json.loads(opponent_board_data),
                                     "current_player": 1 if opponent_turn == "black" else -1,
                                     "your_color": opponent_color,
-                                    "your_turn": opponent_turn == opponent_color
+                                    "your_turn": (opponent_turn == opponent_color)
                                 }))
                                 print(f"[RESTORE] Sent updated board to opponent {opponent_id}")
 
