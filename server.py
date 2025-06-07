@@ -122,6 +122,7 @@ async def websocket_endpoint(websocket: WebSocket):
                                     "board": json.loads(opponent_board_data),
                                     "current_player": 1 if opponent_turn == "black" else -1,
                                     "your_color": opponent_color
+                                    "your_turn": opponent_turn == opponent_color
                                 }))
                                 print(f"[RESTORE] Sent updated board to opponent {opponent_id}")
 
