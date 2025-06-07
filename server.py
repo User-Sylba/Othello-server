@@ -76,7 +76,10 @@ async def websocket_endpoint(websocket: WebSocket):
 
             if data.get("type") == "restore_request":
                 user_id = data.get("user_id")
+                
                 print(f"[RESTORE_REQUEST] from user_id: {user_id}")
+
+                connected_sockets[user_id] = websocket
     
                 board_data = await rdb.get(f"board:{user_id}")
                 turn = await rdb.get(f"turn:{user_id}")
