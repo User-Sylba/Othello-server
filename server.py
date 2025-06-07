@@ -75,6 +75,7 @@ async def websocket_endpoint(websocket: WebSocket):
             data = json.loads(message)
 
             if data.get("type") == "restore_request":
+                
                 user_id = data.get("user_id")
                 
                 print(f"[RESTORE_REQUEST] from user_id: {user_id}")
@@ -85,6 +86,10 @@ async def websocket_endpoint(websocket: WebSocket):
                 turn = await rdb.get(f"turn:{user_id}")
                 color = await rdb.hget(f"user:{user_id}", "color")
                 opponent_id = await rdb.hget(f"user:{user_id}", "opponent")
+
+                print(f"[RESTORE] user_id={user_id}")
+                print(f"[RESTORE] opponent_id={opponent_id}")
+                print(f"[RESTORE] connected_sockets.keys()={list(connected_sockets.keys())}")
 
                 if board_data and turn and color:
         # 復元対象クライアントへ盤面情報を送信
