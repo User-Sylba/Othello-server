@@ -26,6 +26,7 @@ async def websocket_endpoint(websocket: WebSocket):
             # 再接続時に盤面・ターンを復元送信
     
     await websocket.accept()
+    user_id=None
 
     try:
         init_message = await websocket.receive_text()
@@ -71,6 +72,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     logging.warning(f"[WARN] opponent_reconnected の送信失敗: {e}")
 
         while True:
+            
             message = await websocket.receive_text()
             data = json.loads(message)
 
@@ -97,7 +99,8 @@ async def websocket_endpoint(websocket: WebSocket):
                         "current_player": 1 if turn == "black" else -1,
                         "your_color": color,
                         "your_turn":(turn == color),
-                        "opponent_name": opponent_name
+                        "opponent_name": opponent_name,
+                        "reconnect_code": True
                     }))
                     print(f"[RESTORE] Sent restore_board to {user_id}")
 
