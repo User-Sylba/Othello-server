@@ -92,17 +92,21 @@ async def websocket_endpoint(websocket: WebSocket):
 
                 if board_data and turn and color:
                     opponent_name = await rdb.hget(f"user:{user_id}", "opponent_name")
-        
-                    await websocket.send_text(json.dumps({
-                        "type": "restore_board",
-                        "board": json.loads(board_data),
-                        "current_player": 1 if turn == "black" else -1,
-                        "your_color": color,
-                        "your_turn":(turn == color),
-                        "opponent_name": opponent_name,
-                        "reconnect_code": True
-                    }))
-                    print(f"[RESTORE] Sent restore_board to {user_id}")
+                    if not opponent_name:
+                        print(f"[ERROR] opponent_name が取得できません: opponent_id={opponent_id}")
+                    else:
+                        await websocket.send_text(json.dumps({
+                            "type": "restore_board",
+                            "board": json.loads(board_data),
+                            "current_player": 1 if turn == "black" else -1,
+                            "your_color": 1 if color == "black" else -1,
+                            "your_turn":(turn == color),
+                            "opponent_name": opponent_name,
+                            "reconnect_code": True
+                        }))
+                        print(f"[RESTORE] Sent restore_board to {user_id}")
+                else:
+                    print(f"[RESTORE] board_dataなし: user_id={user_id}")
 
         # ✅ 対戦相手に再接続したことを通知
                    
@@ -366,12 +370,14 @@ async def try_match(current_id):
     await rdb.hset(f"user:{user1_id}", mapping={
         "status": "matched",
         "opponent": user2_id,
-        "color": user1_color
+        "color": user1_color,
+        "opponent_name": user2_name
     })
     await rdb.hset(f"user:{user2_id}", mapping={
         "status": "matched",
         "opponent": user1_id,
-        "color": user2_color
+        "color": user2_color,
+        "opponent_name": user1_name
     })
 
     print(f"[MATCH] {user1_id} ({user1_color}) vs {user2_id} ({user2_color})")
