@@ -91,10 +91,13 @@ async def websocket_endpoint(websocket: WebSocket):
                 print(f"[RESTORE] connected_sockets.keys()={list(connected_sockets.keys())}")
 
                 if board_data and turn and color:
-                    opponent_name = await rdb.hget(f"user:{opponent_id}", "name")
-                    if not opponent_name:
-                        print(f"[ERROR] opponent_name が取得できません: opponent_id={opponent_id}")
-                    else:
+                    opponent_id = await rdb.hget(f"user:{user_id}", "name")
+                    opponent_name = None
+                    if opponent_id:
+                        opponent_name = await rdb.hget(f"user:{opponent_id}", "name")
+                        if not opponent_name:
+                            print(f"[ERROR] opponent_name が取得できません: opponent_id={opponent_id}")
+                    
                         await websocket.send_text(json.dumps({
                             "type": "restore_board",
                             "board": json.loads(board_data),
@@ -141,6 +144,8 @@ async def websocket_endpoint(websocket: WebSocket):
 
                 if current_status == "matched":
                     print(f"[INFO] 再接続ユーザー: {user_id}")
+                    
+                    
         
         # 再接続時は盤面と状態を復元して送信
                     board = await rdb.get(f"board:{user_id}")
@@ -158,12 +163,19 @@ async def websocket_endpoint(websocket: WebSocket):
                             await rdb.hset(f"user:{user_id}", "color", color)
         
                     if board and turn and color:
+                        opponent_id = await rdb.hget(f"user:{user_id}", "opponent")
+                        opponent_name = None
+                        if opponent_id:
+                            opponent_name = await rdb.hget(f"user:{opponent_id}", "name")
+                            if opponent_name:
+                                await rdb.hset(f"user:{user_id}", "opponent_name", opponent_name)
                         await websocket.send_text(json.dumps({
                             "type": "restore_board",
                             "board": json.loads(board),
                             "current_player": 1 if turn == "black" else -1,
-                            "your_color": color
-            }))
+                            "your_color": color,
+                            "opponent_name": opponent_name
+                }))
                         print(f"[SEND] restore_board sent to {user_id}")
                     else:
                         print(f"[WARN] 再接続データ不完全: board={board}, turn={turn}, color={color}")
