@@ -91,18 +91,25 @@ async def websocket_endpoint(websocket: WebSocket):
                 print(f"[RESTORE] connected_sockets.keys()={list(connected_sockets.keys())}")
 
                 if board_data and turn and color:
-                    opponent_name = await rdb.hget(f"user:{user_id}", "opponent_name")
-        
-                    await websocket.send_text(json.dumps({
-                        "type": "restore_board",
-                        "board": json.loads(board_data),
-                        "current_player": 1 if turn == "black" else -1,
-                        "your_color": color,
-                        "your_turn":(turn == color),
-                        "opponent_name": opponent_name,
-                        "reconnect_code": True
-                    }))
-                    print(f"[RESTORE] Sent restore_board to {user_id}")
+                    opponent_id = await rdb.hget(f"user:{user_id}", "name")
+                    opponent_name = None
+                    if opponent_id:
+                        opponent_name = await rdb.hget(f"user:{opponent_id}", "name")
+                        if not opponent_name:
+                            print(f"[ERROR] opponent_name が取得できません: opponent_id={opponent_id}")
+                    
+                        await websocket.send_text(json.dumps({
+                            "type": "restore_board",
+                            "board": json.loads(board_data),
+                            "current_player": 1 if turn == "black" else -1,
+                            "your_color": 1 if color == "black" else -1,
+                            "your_turn":(turn == color),
+                            "opponent_name": opponent_name,
+                            "reconnect_code": True
+                        }))
+                        print(f"[RESTORE] Sent restore_board to {user_id}")
+                else:
+                    print(f"[RESTORE] board_dataなし: user_id={user_id}")
 
         # ✅ 対戦相手に再接続したことを通知
                    
@@ -137,6 +144,8 @@ async def websocket_endpoint(websocket: WebSocket):
 
                 if current_status == "matched":
                     print(f"[INFO] 再接続ユーザー: {user_id}")
+                    
+                    
         
         # 再接続時は盤面と状態を復元して送信
                     board = await rdb.get(f"board:{user_id}")
@@ -154,12 +163,19 @@ async def websocket_endpoint(websocket: WebSocket):
                             await rdb.hset(f"user:{user_id}", "color", color)
         
                     if board and turn and color:
+                        opponent_id = await rdb.hget(f"user:{user_id}", "opponent")
+                        opponent_name = None
+                        if opponent_id:
+                            opponent_name = await rdb.hget(f"user:{opponent_id}", "name")
+                            if opponent_name:
+                                await rdb.hset(f"user:{user_id}", "opponent_name", opponent_name)
                         await websocket.send_text(json.dumps({
                             "type": "restore_board",
                             "board": json.loads(board),
                             "current_player": 1 if turn == "black" else -1,
-                            "your_color": color
-            }))
+                            "your_color": color,
+                            "opponent_name": opponent_name
+                }))
                         print(f"[SEND] restore_board sent to {user_id}")
                     else:
                         print(f"[WARN] 再接続データ不完全: board={board}, turn={turn}, color={color}")
@@ -247,49 +263,43 @@ async def websocket_endpoint(websocket: WebSocket):
                 board = json.loads(board_data) if board_data else [[0]*8 for _ in range(8)]
 
     # パス回数記録
-                already_passed = await rdb.get(f"pass:{user_id}")
-                if already_passed == "true":
-        # 連続パス → ゲーム終了
-                    if opponent_id in connected_sockets:
-                        await connected_sockets[opponent_id].send_text(json.dumps({
-                            "type": "end_game",
-                            "board": board,
-                        }))
-                    if user_id in connected_sockets:
-                        await connected_sockets[user_id].send_text(json.dumps({
-                            "type": "end_game",
-                            "board": board,
-                        }))
-                    return
-                else:
-        # 自分はパス → 相手のパス状態リセット
-                    await rdb.set(f"pass:{user_id}", "true", ex=40)
-                    await rdb.set(f"pass:{opponent_id}", "false", ex=40)
+                my_passed = await rdb.get(f"pass:{user_id}")
+                opponent_passed = await rdb.get(f"pass:{opponent_id}")
 
-    # 現在のターンを取得
+                if my_passed == "true" and opponent_passed == "true":
+                    print("[INFO] 両者が連続でパスしました。ゲーム終了処理を開始します。")
+                    for uid in [user_id, opponent_id]:
+                        if uid in connected_sockets:
+                            await connected_sockets[uid].send_text(json.dumps({
+                                "type": "end_game",
+                                "board": board,
+                                "your_color": await rdb.hget(f"user:{uid}", "color")
+                            }))
+                    return
+                await rdb.set(f"pass:{user_id}", "true", ex=40)
+
                 current_turn = await rdb.get(f"turn:{user_id}")
                 if not current_turn:
                     current_turn = "black"
                 next_turn = "white" if current_turn == "black" else "black"
 
-    # board と turn を Redis に保存（再接続用）
+    # 保存（再接続用）
                 await rdb.set(f"board:{user_id}", json.dumps(board), ex=40)
                 await rdb.set(f"board:{opponent_id}", json.dumps(board), ex=40)
                 await rdb.set(f"turn:{user_id}", next_turn, ex=40)
                 await rdb.set(f"turn:{opponent_id}", next_turn, ex=40)
 
-    # 相手の色
-                opponent_color = await rdb.hget(f"user:{opponent_id}", "color")
-
     # 相手にパス通知
+                opponent_color = await rdb.hget(f"user:{opponent_id}", "color")
                 if opponent_id in connected_sockets:
                     await connected_sockets[opponent_id].send_text(json.dumps({
                         "type": "pass",
                         "next_turn": next_turn,
                         "your_color": opponent_color,
                         "your_turn": (next_turn == opponent_color)
-                    }))
-
+            }))
+       
+                    
             elif data.get("type") == "end_game":
                 opponent_id = await rdb.hget(f"user:{user_id}", "opponent")
 
@@ -317,11 +327,13 @@ async def websocket_endpoint(websocket: WebSocket):
                 ]:
                     if socket:
                         try:
+                            opponent_name = await rdb.hget(f"user:{opponent_id if uid == user_id else user_id}", "name")
                             await socket.send_text(json.dumps({
                                 "type": "end_game",
                                 "board": board,
                                 "current_player": 1 if turn == "black" else -1,
-                                "your_color": color
+                                "your_color": color,
+                                "opponent_name":opponent_name
                             }))
                         except Exception as e:
                             logging.warning(f"[WARN] end_game 送信失敗: {e}")
@@ -366,12 +378,14 @@ async def try_match(current_id):
     await rdb.hset(f"user:{user1_id}", mapping={
         "status": "matched",
         "opponent": user2_id,
-        "color": user1_color
+        "color": user1_color,
+        "opponent_name": user2_name
     })
     await rdb.hset(f"user:{user2_id}", mapping={
         "status": "matched",
         "opponent": user1_id,
-        "color": user2_color
+        "color": user2_color,
+        "opponent_name": user1_name
     })
 
     print(f"[MATCH] {user1_id} ({user1_color}) vs {user2_id} ({user2_color})")
