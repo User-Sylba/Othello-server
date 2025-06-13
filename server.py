@@ -162,24 +162,28 @@ async def websocket_endpoint(websocket: WebSocket):
                                 color = "black"
                             await rdb.hset(f"user:{user_id}", "color", color)
         
-                    if board and turn and color:
-                        opponent_id = await rdb.hget(f"user:{user_id}", "opponent")
-                        opponent_name = None
-                        if opponent_id:
-                            opponent_name = await rdb.hget(f"user:{opponent_id}", "name")
-                            if opponent_name:
-                                await rdb.hset(f"user:{user_id}", "opponent_name", opponent_name)
-                        await websocket.send_text(json.dumps({
-                            "type": "restore_board",
-                            "board": json.loads(board),
-                            "current_player": 1 if turn == "black" else -1,
-                            "your_color": color,
-                            "opponent_name": opponent_name
-                }))
-                        print(f"[SEND] restore_board sent to {user_id}")
-                    else:
+                    if not board or not turn or not color:
                         print(f"[WARN] 再接続データ不完全: board={board}, turn={turn}, color={color}")
-                    
+                        await rdb.hset(f"user:{user_id}", "status", "waiting")  # 状態を待機にリセット
+                        return  # 処理をここで終了
+
+# 復元成功処理
+                    opponent_id = await rdb.hget(f"user:{user_id}", "opponent")
+                    opponent_name = None
+                    if opponent_id:
+                        opponent_name = await rdb.hget(f"user:{opponent_id}", "name")
+                        if opponent_name:
+                            await rdb.hset(f"user:{user_id}", "opponent_name", opponent_name)
+
+                    await websocket.send_text(json.dumps({
+                        "type": "restore_board",
+                        "board": json.loads(board),
+                        "current_player": 1 if turn == "black" else -1,
+                        "your_color": color,
+                        "opponent_name": opponent_name
+                    }))
+                    print(f"[SEND] restore_board sent to {user_id}")
+                
 
     # 通常の新規マッチング登録
                 await rdb.hset(f"user:{user_id}", mapping={
@@ -234,10 +238,10 @@ async def websocket_endpoint(websocket: WebSocket):
                 next_turn = "white" if current_turn == "black" else "black"
 
     # Redisに保存（再接続対応）
-                await rdb.set(f"board:{user_id}", json.dumps(board), ex=40)
-                await rdb.set(f"board:{opponent_id}", json.dumps(board), ex=40)
-                await rdb.set(f"turn:{user_id}", next_turn, ex=40)
-                await rdb.set(f"turn:{opponent_id}", next_turn, ex=40)
+                await rdb.set(f"board:{user_id}", json.dumps(board), ex=3600)
+                await rdb.set(f"board:{opponent_id}", json.dumps(board), ex=3600)
+                await rdb.set(f"turn:{user_id}", next_turn, ex=3600)
+                await rdb.set(f"turn:{opponent_id}", next_turn, ex=3600)
 
     # 両者に座標と色、次のターンを通知（board は送らない）
                 for uid, color, socket in [
@@ -284,10 +288,10 @@ async def websocket_endpoint(websocket: WebSocket):
                 next_turn = "white" if current_turn == "black" else "black"
 
     # 保存（再接続用）
-                await rdb.set(f"board:{user_id}", json.dumps(board), ex=40)
-                await rdb.set(f"board:{opponent_id}", json.dumps(board), ex=40)
-                await rdb.set(f"turn:{user_id}", next_turn, ex=40)
-                await rdb.set(f"turn:{opponent_id}", next_turn, ex=40)
+                await rdb.set(f"board:{user_id}", json.dumps(board), ex=3600)
+                await rdb.set(f"board:{opponent_id}", json.dumps(board), ex=3600)
+                await rdb.set(f"turn:{user_id}", next_turn, ex=3600)
+                await rdb.set(f"turn:{opponent_id}", next_turn, ex=3600)
 
     # 相手にパス通知
                 opponent_color = await rdb.hget(f"user:{opponent_id}", "color")
@@ -419,10 +423,10 @@ async def try_match(current_id):
     save_board[mid - 1][mid] = 1
     save_board[mid][mid - 1] = 1
 
-    await rdb.set(f"board:{user1_id}", json.dumps(save_board), ex=40)
-    await rdb.set(f"board:{user2_id}", json.dumps(save_board), ex=40)
-    await rdb.set(f"turn:{user1_id}", first_turn, ex=40)
-    await rdb.set(f"turn:{user2_id}", first_turn, ex=40)
+    await rdb.set(f"board:{user1_id}", json.dumps(save_board), ex=3600)
+    await rdb.set(f"board:{user2_id}", json.dumps(save_board), ex=3600)
+    await rdb.set(f"turn:{user1_id}", first_turn, ex=3600)
+    await rdb.set(f"turn:{user2_id}", first_turn, ex=3600)
 
 async def handle_disconnect(user_id):
     opponent_id = await rdb.hget(f"user:{user_id}", "opponent")
