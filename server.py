@@ -253,8 +253,8 @@ async def websocket_endpoint(websocket: WebSocket):
                             "type": "move",
                             "x": x,
                             "y": y,
-                            "color": my_color,  # どの色が置かれたか
-                            "next_turn": next_turn,
+                            "color": "black" if turn == 1 else "white",  # ← このターンに置いた石の色（全員共通）  # どの色が置かれたか
+                            "next_turn": "white" if next_turn == -1 else "black",
                             "your_color": color,
                             "your_turn": (next_turn == color)
                         }))
