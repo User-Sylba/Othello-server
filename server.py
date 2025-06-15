@@ -451,3 +451,37 @@ async def handle_disconnect(user_id):
         await rdb.expire(f"user:{opponent_id}", 40)
         await rdb.expire(f"board:{opponent_id}", 40)
         await rdb.expire(f"turn:{opponent_id}", 40)
+
+        asyncio.create_task(wait_end(user_id, opponent_id))
+
+async def wait_end(disconnect_id, opponent_id):
+    await asyncio.sleep(40)
+    if disconnect_id not in connected_sockets:
+        print(f"[TIMEOUT]ユーザー {disconnect_id} が再接続しませんでした。")
+        
+        board_data = await rdb.get(f"board:{opponent_id}")
+        turn = await rdb.get(f"turn:{opponent_id}")
+        color = await rdb.hget(f"user:{opponent_id}", "color")
+
+        if board_data and turn and color and opponent_id in connected_sockets:
+            try:
+                await connected_sockets[opponent_id].send_text(json.dumps({
+                    "type": "end_game",
+                    "board": json.loads(board_data),
+                    "current_player": 1 if turn == "black" else -1,
+                    "your_color": color,
+                    
+                }))
+                print(f"[END_GAME] {opponent_id} に対戦終了を通知しました。")
+            except Exception as e:
+                print(f"[ERROR] end_game の送信失敗: {e}")
+
+        await rdb.delete(f"user:{disconnect_id}")
+        await rdb.delete(f"user:{opponent_id}")
+        await rdb.delete(f"board:{disconnect_id}")
+        await rdb.delete(f"board:{opponent_id}")
+        await rdb.delete(f"turn:{disconnect_id}")
+        await rdb.delete(f"turn:{opponent_id}")
+        print(f"[CLEANUP] {disconnect_id} と {opponent_id} のデータを削除しました。")
+
+    
