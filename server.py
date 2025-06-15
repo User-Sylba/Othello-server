@@ -127,11 +127,10 @@ async def websocket_endpoint(websocket: WebSocket):
                             opponent_board_data = await rdb.get(f"board:{opponent_id}")
                             if opponent_turn and opponent_color and opponent_board_data:
                                 await connected_sockets[opponent_id].send_text(json.dumps({
-                                    "type": "restore_board",
+                                    "type": "update_board",
                                     "board": json.loads(opponent_board_data),
                                     "current_player": 1 if opponent_turn == "black" else -1,
-                                    "your_color": opponent_color,
-                                    "your_turn": (opponent_turn == opponent_color)
+                                    
                                 }))
                                 print(f"[RESTORE] Sent updated board to opponent {opponent_id}")
 
@@ -255,7 +254,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             "y": y,
                             "color": my_color,
                             "next_turn": next_turn,
-                            "your_color": color,
+                            "your_color": "black" if my_color == 1 else "white",
                             "your_turn": (next_turn == color)
                         }))
 
@@ -401,17 +400,19 @@ async def try_match(current_id):
             "type": "start_game",
             "your_color": user1_color,
             "opponent_name": user2_name,
-            "first_turn": first_turn
+            "first_turn": first_turn,
+            "board": save_board
         }))
     else:
         logging.warning(f"[try_match] user1_id {user1_id} がconnected_socketsに存在しません")
 
     if user2_id in connected_sockets:
         await connected_sockets[user2_id].send_text(json.dumps({
-        "type": "start_game",
-        "your_color": user2_color,
-        "opponent_name": user1_name,
-        "first_turn": first_turn
+            "type": "start_game",
+            "your_color": user2_color,
+            "opponent_name": user1_name,
+            "first_turn": first_turn,
+            "board": save_board
         }))
     else:
          logging.warning(f"[try_match] user2_id {user2_id} がconnected_socketsに存在しません")
