@@ -430,6 +430,8 @@ async def try_match(current_id):
     await rdb.set(f"turn:{user2_id}", first_turn, ex=3600)
 
 async def handle_disconnect(user_id):
+    global save_board
+    print (save_board)
     opponent_id = await rdb.hget(f"user:{user_id}", "opponent")
 
     # userデータを完全には消さず、40秒だけ保持
