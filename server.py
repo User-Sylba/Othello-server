@@ -355,6 +355,7 @@ async def websocket_endpoint(websocket: WebSocket):
         await handle_disconnect(user_id)
 
 async def try_match(current_id):
+    global save_board
     all_keys = await rdb.keys("user:*")
     waiting_users = []
     for key in all_keys:
