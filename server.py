@@ -20,6 +20,13 @@ app = FastAPI()
 
 connected_sockets = {}
 
+save_board = [[0] * 8 for _ in range(8)]
+mid = 4
+save_board[mid - 1][mid - 1] = -1
+save_board[mid][mid] = -1
+save_board[mid - 1][mid] = 1
+save_board[mid][mid - 1] = 1
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     logging.info("[CONNECT] WebSocket 接続開始")
@@ -417,12 +424,7 @@ async def try_match(current_id):
     else:
          logging.warning(f"[try_match] user2_id {user2_id} がconnected_socketsに存在しません")
 
-    save_board = [[0] * 8 for _ in range(8)]
-    mid = 4
-    save_board[mid - 1][mid - 1] = -1
-    save_board[mid][mid] = -1
-    save_board[mid - 1][mid] = 1
-    save_board[mid][mid - 1] = 1
+    
 
     await rdb.set(f"board:{user1_id}", json.dumps(save_board), ex=3600)
     await rdb.set(f"board:{user2_id}", json.dumps(save_board), ex=3600)
