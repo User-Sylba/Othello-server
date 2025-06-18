@@ -259,7 +259,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             "type": "move",
                             "x": x,
                             "y": y,
-                            "color": color,
+                            "color": my_color,
                             "next_turn": next_turn,
                             "your_color": "black" if my_color == 1 else "white",
                             "your_turn": (next_turn == color)
