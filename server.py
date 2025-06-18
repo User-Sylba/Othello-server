@@ -98,7 +98,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 print(f"[RESTORE] connected_sockets.keys()={list(connected_sockets.keys())}")
 
                 if board_data and turn and color:
-                    opponent_id = await rdb.hget(f"user:{user_id}", "name")
+                    opponent_id = await rdb.hget(f"user:{user_id}", "opponent")
                     opponent_name = None
                     if opponent_id:
                         opponent_name = await rdb.hget(f"user:{opponent_id}", "name")
