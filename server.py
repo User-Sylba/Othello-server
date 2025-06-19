@@ -145,14 +145,14 @@ async def websocket_endpoint(websocket: WebSocket):
                             print(f"[WARN] Failed to notify opponent or send board: {e}")
 
             if data.get("type") == "register":
+                user_id = data.get("user_id")
+                name = data.get("name")
                 connected_sockets[user_id] = websocket
                 current_status = await rdb.hget(f"user:{user_id}", "status")
 
                 if current_status == "matched":
                     print(f"[INFO] 再接続ユーザー: {user_id}")
                     
-                    
-        
         # 再接続時は盤面と状態を復元して送信
                     board = await rdb.get(f"board:{user_id}")
                     turn = await rdb.get(f"turn:{user_id}")
@@ -186,9 +186,11 @@ async def websocket_endpoint(websocket: WebSocket):
                         "board": json.loads(board),
                         "current_player": 1 if turn == "black" else -1,
                         "your_color": color,
+                        "your_turn": (turn == color),
                         "opponent_name": opponent_name
                     }))
                     print(f"[SEND] restore_board sent to {user_id}")
+                    return
                 
 
     # 通常の新規マッチング登録
