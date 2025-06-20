@@ -20,12 +20,14 @@ app = FastAPI()
 
 connected_sockets = {}
 
-save_board = [[0] * 8 for _ in range(8)]
-mid = 4
-save_board[mid - 1][mid - 1] = -1
-save_board[mid][mid] = -1
-save_board[mid - 1][mid] = 1
-save_board[mid][mid - 1] = 1
+def save_board():
+    board = [[0] * 8 for _ in range(8)]
+    mid = 4
+    board[mid - 1][mid - 1] = -1
+    board[mid][mid] = -1
+    board[mid - 1][mid] = 1
+    board[mid][mid - 1] = 1
+    return board
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -321,7 +323,9 @@ async def websocket_endpoint(websocket: WebSocket):
         await handle_disconnect(user_id)
 
 async def try_match(current_id):
-    global save_board
+    print(f"[DEBUG] try_match called for {current_id}")
+    print(f"[DEBUG] waiting_users =", waiting_users)
+    
     all_keys = await rdb.keys("user:*")
     waiting_users = []
     for key in all_keys:
@@ -369,13 +373,15 @@ async def try_match(current_id):
 
     await asyncio.sleep(2.0)
 
+    board = save_board()
+
     if user1_id in connected_sockets:
         await connected_sockets[user1_id].send_text(json.dumps({
             "type": "start_game",
             "your_color": user1_color,
             "opponent_name": user2_name,
             "first_turn": first_turn,
-            "board": save_board
+            "board": board
         }))
     else:
         logging.warning(f"[try_match] user1_id {user1_id} がconnected_socketsに存在しません")
@@ -386,21 +392,21 @@ async def try_match(current_id):
             "your_color": user2_color,
             "opponent_name": user1_name,
             "first_turn": first_turn,
-            "board": save_board
+            "board": board
         }))
     else:
          logging.warning(f"[try_match] user2_id {user2_id} がconnected_socketsに存在しません")
 
     
 
-    await rdb.set(f"board:{user1_id}", json.dumps(save_board), ex=3600)
-    await rdb.set(f"board:{user2_id}", json.dumps(save_board), ex=3600)
+    await rdb.set(f"board:{user1_id}", json.dumps(board), ex=3600)
+    await rdb.set(f"board:{user2_id}", json.dumps(board), ex=3600)
     await rdb.set(f"turn:{user1_id}", first_turn, ex=3600)
     await rdb.set(f"turn:{user2_id}", first_turn, ex=3600)
 
 async def handle_disconnect(user_id):
-    global save_board
-    print (save_board)
+    
+    
     opponent_id = await rdb.hget(f"user:{user_id}", "opponent")
 
     # userデータを完全には消さず、40秒だけ保持
