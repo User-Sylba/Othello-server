@@ -41,71 +41,27 @@ async def websocket_endpoint(websocket: WebSocket):
         init_message = await websocket.receive_text()
         init_data = json.loads(init_message)
 
-        user_id = init_data.get("user_id")
-        name = init_data.get("name")
-        print(f"[INIT] user_id:{user_id}, name:{name}")
-
-        connected_sockets[user_id] = websocket
-
-        board_data = await rdb.get(f"board:{user_id}")
-        turn = await rdb.get(f"turn:{user_id}")
-        color = await rdb.hget(f"user:{user_id}", "color")
-
-        if board_data and turn and color:
-            await websocket.send_text(json.dumps({
-                "type": "restore_board",
-                "board": json.loads(board_data),
-                "current_player": 1 if turn == "black" else -1,
-                "your_color": color
-            }))
-        
-
-        existing_status = await rdb.hget(f"user:{user_id}","status")
-        if existing_status is None:
-            await rdb.hset(f"user:{user_id}", mapping={
-                "name": name,
-                "status": "waiting",
-                "opponent": ""
-        })
-        
-        # 再接続時の通知
-        opponent_id = await rdb.hget(f"user:{user_id}", "opponent")
-        if opponent_id:
-            opponent_socket = connected_sockets.get(opponent_id)
-            if opponent_socket:
-                try:
-                    await opponent_socket.send_text(json.dumps({
-                        "type": "opponent_reconnected"
-                    }))
-                except Exception as e:
-                    logging.warning(f"[WARN] opponent_reconnected の送信失敗: {e}")
-
-        while True:
-            
-            message = await websocket.receive_text()
-            data = json.loads(message)
-
-            if data.get("type") == "register":
+        data_type = init_data.get("type")
+        if data_type == "register":
                 print(f"[REGISTER] {user_id} 登録処理開始") 
-                user_id = data.get("user_id")
-                name = data.get("name")
+                user_id = init_data.get("user_id")
+                name = init_data.get("name")
                 connected_sockets[user_id] = websocket
-                current_status = await rdb.hget(f"user:{user_id}", "status")
 
+                current_status = await rdb.hget(f"user:{user_id}", "status")
                 if current_status == "matched":
                     print(f"[WARN] register 経由で matched ユーザーが再接続しようとしています（無視）")
                     await rdb.hset(f"user:{user_id}", "status", "waiting")
-                
-
     # 通常の新規マッチング登録
                 await rdb.hset(f"user:{user_id}", mapping={
                     "name": name,
-                    "status": "waiting"
+                    "status": "waiting",
+                    "opponent": ""
                 })
                 asyncio.create_task(try_match(user_id))
 
-            if data.get("type") == "restore_request":    
-                user_id = data.get("user_id") 
+        elif data_type == "restore_request":    
+                user_id = init_data.get("user_id") 
                 print(f"[RESTORE_REQUEST] from user_id: {user_id}")
                 connected_sockets[user_id] = websocket
     
@@ -165,9 +121,22 @@ async def websocket_endpoint(websocket: WebSocket):
                         except Exception as e:
                             print(f"[WARN] Failed to notify opponent or send board: {e}")
 
+       
+
+        
+        while True:
+            
+            message = await websocket.receive_text()
+            data = json.loads(message)
+
+            
+
+            
+
+            
             
                 
-            elif data.get("type") == "move":
+            if data.get("type") == "move":
                 x = data["x"]
                 y = data["y"]
 
