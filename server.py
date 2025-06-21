@@ -86,6 +86,7 @@ async def websocket_endpoint(websocket: WebSocket):
             data = json.loads(message)
 
             if data.get("type") == "register":
+                print(f"[REGISTER] {user_id} 登録処理開始") 
                 user_id = data.get("user_id")
                 name = data.get("name")
                 connected_sockets[user_id] = websocket
