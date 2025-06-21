@@ -93,7 +93,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
                 if current_status == "matched":
                     print(f"[WARN] register 経由で matched ユーザーが再接続しようとしています（無視）")
-                    return
+                    await rdb.hset(f"user:{user_id}", "status", "waiting")
                 
 
     # 通常の新規マッチング登録
