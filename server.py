@@ -40,19 +40,63 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         init_message = await websocket.receive_text()
         init_data = json.loads(init_message)
-
         data_type = init_data.get("type")
-        if data_type == "register":
-                print(f"[REGISTER] {user_id} 登録処理開始") 
-                user_id = init_data.get("user_id")
-                name = init_data.get("name")
-                connected_sockets[user_id] = websocket
 
-                current_status = await rdb.hget(f"user:{user_id}", "status")
-                if current_status == "matched":
-                    print(f"[WARN] register 経由で matched ユーザーが再接続しようとしています（無視）")
-                    await rdb.hset(f"user:{user_id}", "status", "waiting")
-    # 通常の新規マッチング登録
+        if data_type == "register":
+            user_id = init_data.get("user_id")
+            name = init_data.get("name")
+            connected_sockets[user_id] = websocket
+
+            exists = await rdb.exists(f"user:{user_id}")
+            if exists:
+                # 🔁 再接続と判定
+                print(f"[RESTORE] user_id={user_id} は再接続と判断")
+
+                board_data = await rdb.get(f"board:{user_id}")
+                turn = await rdb.get(f"turn:{user_id}")
+                color = await rdb.hget(f"user:{user_id}", "color")
+                opponent_id = await rdb.hget(f"user:{user_id}", "opponent")
+
+                opponent_name = await rdb.hget(f"user:{opponent_id}", "name") if opponent_id else None
+
+                if board_data and turn and color:
+                    await websocket.send_text(json.dumps({
+                        "type": "restore_board",
+                        "board": json.loads(board_data),
+                        "current_player": 1 if turn == "black" else -1,
+                        "your_color": 1 if color == "black" else -1,
+                        "your_turn": turn == color,
+                        "opponent_name": opponent_name,
+                        "reconnect_code": True
+                    }))
+                    print(f"[RESTORE] Sent restore_board to {user_id}")
+
+                    # 相手に通知
+                    if opponent_id in connected_sockets:
+                        try:
+                            await connected_sockets[opponent_id].send_text(json.dumps({
+                                "type": "opponent_reconnected",
+                                "user_id": user_id
+                            }))
+                            print(f"[RESTORE] Notified opponent {opponent_id}")
+                            
+                            # 最新盤面を相手にも送る
+                            opponent_turn = await rdb.get(f"turn:{opponent_id}")
+                            opponent_board_data = await rdb.get(f"board:{opponent_id}")
+                            if opponent_turn and opponent_board_data:
+                                await connected_sockets[opponent_id].send_text(json.dumps({
+                                    "type": "update_board",
+                                    "board": json.loads(opponent_board_data),
+                                    "current_player": 1 if opponent_turn == "black" else -1,
+                                }))
+                        except Exception as e:
+                            print(f"[WARN] Failed to notify opponent: {e}")
+                else:
+                    print(f"[RESTORE] board_data などが不完全")
+
+            else:
+                # 🆕 初回接続と判定 → Redis に登録
+                print(f"[REGISTER] user_id={user_id} は新規登録と判断")
                 await rdb.hset(f"user:{user_id}", mapping={
                     "name": name,
                     "status": "waiting",
@@ -60,82 +104,16 @@ async def websocket_endpoint(websocket: WebSocket):
                 })
                 asyncio.create_task(try_match(user_id))
 
-        elif data_type == "restore_request":    
-                user_id = init_data.get("user_id") 
-                print(f"[RESTORE_REQUEST] from user_id: {user_id}")
-                connected_sockets[user_id] = websocket
-    
-                board_data = await rdb.get(f"board:{user_id}")
-                turn = await rdb.get(f"turn:{user_id}")
-                color = await rdb.hget(f"user:{user_id}", "color")
-                opponent_id = await rdb.hget(f"user:{user_id}", "opponent")
-
-                print(f"[RESTORE] user_id={user_id}")
-                print(f"[RESTORE] opponent_id={opponent_id}")
-                print(f"[RESTORE] connected_sockets.keys()={list(connected_sockets.keys())}")
-
-                if board_data and turn and color:
-                    opponent_id = await rdb.hget(f"user:{user_id}", "opponent")
-                    opponent_name = None
-                    if opponent_id:
-                        opponent_name = await rdb.hget(f"user:{opponent_id}", "name")
-                        if not opponent_name:
-                            print(f"[ERROR] opponent_name が取得できません: opponent_id={opponent_id}")
-                    
-                        await websocket.send_text(json.dumps({
-                            "type": "restore_board",
-                            "board": json.loads(board_data),
-                            "current_player": 1 if turn == "black" else -1,
-                            "your_color": 1 if color == "black" else -1,
-                            "your_turn":(turn == color),
-                            "opponent_name": opponent_name,
-                            "reconnect_code": True
-                        }))
-                        print(f"[RESTORE] Sent restore_board to {user_id}")
-                else:
-                    print(f"[RESTORE] board_dataなし: user_id={user_id}")
-
-        # ✅ 対戦相手に再接続したことを通知
-                   
-                    if opponent_id in connected_sockets:
-                        try:
-                            await connected_sockets[opponent_id].send_text(json.dumps({
-                               "type": "opponent_reconnected",
-                               "user_id": user_id
-                            }))
-                            print(f"[RESTORE] Notified opponent {opponent_id} about {user_id}'s reconnection")
-
-            # 🔁 相手側にも最新盤面を送信
-                            opponent_turn = await rdb.get(f"turn:{opponent_id}")
-                            opponent_color = await rdb.hget(f"user:{opponent_id}", "color")
-                            opponent_board_data = await rdb.get(f"board:{opponent_id}")
-                            if opponent_turn and opponent_color and opponent_board_data:
-                                await connected_sockets[opponent_id].send_text(json.dumps({
-                                    "type": "update_board",
-                                    "board": json.loads(opponent_board_data),
-                                    "current_player": 1 if opponent_turn == "black" else -1,
-                                    
-                                }))
-                                print(f"[RESTORE] Sent updated board to opponent {opponent_id}")
-
-                        except Exception as e:
-                            print(f"[WARN] Failed to notify opponent or send board: {e}")
-
-       
-
+    except Exception as e:
+        logging.error(f"[ERROR] 初期受信処理中にエラー: {e}")
+        
         
         while True:
             
             message = await websocket.receive_text()
             data = json.loads(message)
 
-            
 
-            
-
-            
-            
-                
             if data.get("type") == "move":
                 x = data["x"]
                 y = data["y"]
@@ -287,10 +265,10 @@ async def websocket_endpoint(websocket: WebSocket):
                             logging.warning(f"[WARN] end_game 送信失敗: {e}")
 
                 
-
     except WebSocketDisconnect:
         logging.info(f"[DISCONNECT] {user_id} が切断されました")
-        await handle_disconnect(user_id)
+        if user_id:
+            await handle_disconnect(user_id)
 
 async def try_match(current_id):
     print(f"[DEBUG] try_match called for {current_id}")
