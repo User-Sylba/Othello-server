@@ -294,7 +294,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
 async def try_match(current_id):
     print(f"[DEBUG] try_match called for {current_id}")
-    print(f"[DEBUG] waiting_users =", waiting_users)
+    
     
     all_keys = await rdb.keys("user:*")
     waiting_users = []
@@ -303,6 +303,8 @@ async def try_match(current_id):
         status = await rdb.hget(key, "status")
         if status == "waiting":
             waiting_users.append(uid)
+
+    print(f"[DEBUG] waiting_users =", waiting_users)
 
     if len(waiting_users) < 2:
         return
