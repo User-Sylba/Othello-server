@@ -108,8 +108,8 @@ async def websocket_endpoint(websocket: WebSocket):
         logging.error(f"[ERROR] 初期受信処理中にエラー: {e}")
         
         
-        while True:
-            
+    while True:
+        try:
             message = await websocket.receive_text()
             data = json.loads(message)
 
@@ -265,10 +265,13 @@ async def websocket_endpoint(websocket: WebSocket):
                             logging.warning(f"[WARN] end_game 送信失敗: {e}")
 
                 
-    except WebSocketDisconnect:
-        logging.info(f"[DISCONNECT] {user_id} が切断されました")
-        if user_id:
-            await handle_disconnect(user_id)
+        except WebSocketDisconnect:
+            logging.info(f"[DISCONNECT] {user_id} が切断されました")
+            if user_id:
+                 await handle_disconnect(user_id)
+            break
+        except Exception as e:
+            logging.warning(f"[WARN] 通常ループ中のエラー: {e}")
 
 async def try_match(current_id):
     print(f"[DEBUG] try_match called for {current_id}")
