@@ -39,7 +39,9 @@ async def websocket_endpoint(websocket: WebSocket):
 
     try:
         init_message = await websocket.receive_text()
+        print(f"[DEBUG] 初期メッセージ受信: {init_message}")
         init_data = json.loads(init_message)
+        print(f"[DEBUG] 初期データ: {init_data}")
         data_type = init_data.get("type")
 
         if data_type == "register":
