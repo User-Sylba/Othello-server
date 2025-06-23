@@ -62,10 +62,11 @@ async def websocket_endpoint(websocket: WebSocket):
                 opponent_name = await rdb.hget(f"user:{opponent_id}", "name") if opponent_id else None
 
                 if board_data and turn and color:
+                    print(f"[RESTORE] user_id={user_id}, turn={turn}, color={color}")
                     await websocket.send_text(json.dumps({
                         "type": "restore_board",
                         "board": json.loads(board_data),
-                        "current_player": 1 if turn == "black" else -1,
+                        "current_player": turn,
                         "your_color": 1 if color == "black" else -1,
                         "your_turn": turn == color,
                         "opponent_name": opponent_name,
