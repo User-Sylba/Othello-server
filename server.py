@@ -57,8 +57,10 @@ async def websocket_endpoint(websocket: WebSocket):
                 logging.info(f"[REGISTER] Redisに既存 user:{user_id}（status={status}）")
                 if status == "matched":
 
-                    board_data = await rdb.get(f"board:{user_id}")
-                    turn = await rdb.get(f"turn:{user_id}")
+                    game_id = await rdb.hget(f"user:{user_id}", "game_id")
+
+                    board_data = await rdb.get(f"board:{game_id}")
+                    turn = await rdb.get(f"turn:{game_id}")
                     color = await rdb.hget(f"user:{user_id}", "color")
                     opponent_id = await rdb.hget(f"user:{user_id}", "opponent")
 
@@ -87,8 +89,8 @@ async def websocket_endpoint(websocket: WebSocket):
                                 logging.info(f"[RESTORE] Notified opponent {opponent_id}")
                             
                             # 最新盤面を相手にも送る
-                                opponent_turn = await rdb.get(f"turn:{opponent_id}")
-                                opponent_board_data = await rdb.get(f"board:{opponent_id}")
+                                opponent_turn = await rdb.get(f"turn:{game_id}")
+                                opponent_board_data = await rdb.get(f"board:{game_id}")
                                 if opponent_turn and opponent_board_data:
                                     await connected_sockets[opponent_id].send_text(json.dumps({
                                         "type": "update_board",
@@ -138,7 +140,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 opponent_color = "black" if my_color == "white" else "white"
 
     # 現在の board を取得し、反転処理
-                board_data = await rdb.get(f"board:{user_id}")
+                game_id = await rdb.hget(f"user:{user_id}", "game_id")
+                board_data = await rdb.get(f"board:{game_id}")
                 board = json.loads(board_data) if board_data else [[0]*8 for _ in range(8)]
                 color_value = 1 if my_color == "black" else -1
 
@@ -169,16 +172,16 @@ async def websocket_endpoint(websocket: WebSocket):
                 board = place_stone(board, x, y, color_value)
 
     # 次のターンを決定
-                current_turn = await rdb.get(f"turn:{user_id}")
+                current_turn = await rdb.get(f"turn:{game_id}")
                 if not current_turn:
                     current_turn = "black"
                 next_turn = "white" if current_turn == "black" else "black"
 
     # Redisに保存（再接続対応）
-                await rdb.set(f"board:{user_id}", json.dumps(board), ex=3600)
-                await rdb.set(f"board:{opponent_id}", json.dumps(board), ex=3600)
-                await rdb.set(f"turn:{user_id}", next_turn, ex=3600)
-                await rdb.set(f"turn:{opponent_id}", next_turn, ex=3600)
+                await rdb.set(f"board:{game_id}", json.dumps(board), ex=3600)
+                
+                await rdb.set(f"turn:{game_id}", next_turn, ex=3600)
+               
 
     # 両者に座標と色、次のターンを通知（board は送らない）
                 for uid, color, socket in [
@@ -197,10 +200,11 @@ async def websocket_endpoint(websocket: WebSocket):
                         }))
 
             elif data.get("type") == "pass":
+                game_id = await rdb.hget(f"user:{user_id}", "game_id")
                 opponent_id = await rdb.hget(f"user:{user_id}", "opponent")
 
     # 現在の board を取得
-                board_data = await rdb.get(f"board:{user_id}")
+                board_data = await rdb.get(f"board:{game_id}")
                 board = json.loads(board_data) if board_data else [[0]*8 for _ in range(8)]
 
     # パス回数記録
@@ -219,17 +223,16 @@ async def websocket_endpoint(websocket: WebSocket):
                     return
                 await rdb.set(f"pass:{user_id}", "true", ex=40)
 
-                current_turn = await rdb.get(f"turn:{user_id}")
+                current_turn = await rdb.get(f"turn:{game_id}")
                 if not current_turn:
                     current_turn = "black"
                 next_turn = "white" if current_turn == "black" else "black"
 
     # 保存（再接続用）
-                await rdb.set(f"board:{user_id}", json.dumps(board), ex=3600)
-                await rdb.set(f"board:{opponent_id}", json.dumps(board), ex=3600)
-                await rdb.set(f"turn:{user_id}", next_turn, ex=3600)
-                await rdb.set(f"turn:{opponent_id}", next_turn, ex=3600)
-
+                await rdb.set(f"board:{game_id}", json.dumps(board), ex=3600)
+                
+                await rdb.set(f"turn:{game_id}", next_turn, ex=3600)
+                
     # 相手にパス通知
                 opponent_color = await rdb.hget(f"user:{opponent_id}", "color")
                 if opponent_id in connected_sockets:
@@ -243,16 +246,16 @@ async def websocket_endpoint(websocket: WebSocket):
                     
             elif data.get("type") == "end_game":
                 opponent_id = await rdb.hget(f"user:{user_id}", "opponent")
+                game_id = await rdb.hget(f"user:{user_id}", "game_id")
 
     # 再接続用に有効期限を延長
-                await rdb.expire(f"board:{user_id}", 40)
-                await rdb.expire(f"board:{opponent_id}", 40)
-                await rdb.expire(f"turn:{user_id}", 40)
-                await rdb.expire(f"turn:{opponent_id}", 40)
-
+                await rdb.expire(f"board:{game_id}", 40)
+                
+                await rdb.expire(f"turn:{game_id}", 40)
+                
     # Redisから取得（受信ではなく）
-                board_data = await rdb.get(f"board:{user_id}")
-                turn = await rdb.get(f"turn:{user_id}")
+                board_data = await rdb.get(f"board:{game_id}")
+                turn = await rdb.get(f"turn:{game_id}")
                 board = json.loads(board_data) if board_data else [[0]*8 for _ in range(8)]
 
                 my_color = await rdb.hget(f"user:{user_id}", "color")
@@ -290,7 +293,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
 async def try_match(current_id):
     logging.info(f"[DEBUG] try_match called for {current_id}")
-    
+    game_id = str(uuid.uuid4())
     
     all_keys = await rdb.keys("user:*")
     waiting_users = []
@@ -310,6 +313,7 @@ async def try_match(current_id):
     if not candidates:
         return
     
+    
     opponent_id = random.choice(candidates)
     user_ids = [current_id, opponent_id]
     random.shuffle(user_ids)
@@ -325,12 +329,14 @@ async def try_match(current_id):
     first_turn = "black"
 
     await rdb.hset(f"user:{user1_id}", mapping={
+        "game_id": game_id,
         "status": "matched",
         "opponent": user2_id,
         "color": user1_color,
         "opponent_name": user2_name
     })
     await rdb.hset(f"user:{user2_id}", mapping={
+        "game_id": game_id,
         "status": "matched",
         "opponent": user1_id,
         "color": user2_color,
@@ -367,20 +373,20 @@ async def try_match(current_id):
 
     
 
-    await rdb.set(f"board:{user1_id}", json.dumps(board), ex=3600)
-    await rdb.set(f"board:{user2_id}", json.dumps(board), ex=3600)
-    await rdb.set(f"turn:{user1_id}", first_turn, ex=3600)
-    await rdb.set(f"turn:{user2_id}", first_turn, ex=3600)
+    await rdb.set(f"board:{game_id}", json.dumps(board), ex=3600)
+    
+    await rdb.set(f"turn:{game_id}", first_turn, ex=3600)
+    
 
 async def handle_disconnect(user_id):
     
-    
+    game_id = await rdb.hget(f"user:{user_id}", "game_id")
     opponent_id = await rdb.hget(f"user:{user_id}", "opponent")
 
     # userデータを完全には消さず、40秒だけ保持
     await rdb.expire(f"user:{user_id}", 40)
-    await rdb.expire(f"board:{user_id}", 40)
-    await rdb.expire(f"turn:{user_id}", 40)
+    await rdb.expire(f"board:{game_id}", 40)
+    await rdb.expire(f"turn:{game_id}", 40)
 
     connected_sockets.pop(user_id, None)
 
@@ -394,8 +400,8 @@ async def handle_disconnect(user_id):
 
         # 対戦相手も40秒後にクリーンアップできるように更新
         await rdb.expire(f"user:{opponent_id}", 40)
-        await rdb.expire(f"board:{opponent_id}", 40)
-        await rdb.expire(f"turn:{opponent_id}", 40)
+        await rdb.expire(f"board:{game_id}", 40)
+        await rdb.expire(f"turn:{game_id}", 40)
 
         asyncio.create_task(wait_end(user_id, opponent_id))
 
@@ -403,9 +409,10 @@ async def wait_end(disconnect_id, opponent_id):
     await asyncio.sleep(40)
     if disconnect_id not in connected_sockets:
         print(f"[TIMEOUT]ユーザー {disconnect_id} が再接続しませんでした。")
+        game_id = await rdb.hget(f"user:{disconnect_id}", "game_id")
         
-        board_data = await rdb.get(f"board:{opponent_id}")
-        turn = await rdb.get(f"turn:{opponent_id}")
+        board_data = await rdb.get(f"board:{game_id}")
+        turn = await rdb.get(f"turn:{game_id}")
         color = await rdb.hget(f"user:{opponent_id}", "color")
 
         if board_data and turn and color and opponent_id in connected_sockets:
@@ -423,10 +430,10 @@ async def wait_end(disconnect_id, opponent_id):
 
         await rdb.delete(f"user:{disconnect_id}")
         await rdb.delete(f"user:{opponent_id}")
-        await rdb.delete(f"board:{disconnect_id}")
-        await rdb.delete(f"board:{opponent_id}")
-        await rdb.delete(f"turn:{disconnect_id}")
-        await rdb.delete(f"turn:{opponent_id}")
+        await rdb.delete(f"board:{game_id}")
+        
+        await rdb.delete(f"turn:{game_id}")
+       
         print(f"[CLEANUP] {disconnect_id} と {opponent_id} のデータを削除しました。")
 
     
