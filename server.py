@@ -95,11 +95,11 @@ async def websocket_endpoint(websocket: WebSocket):
                                
 
                                 if opponent_turn and opponent_board_data:
-                                    current_player_value = 1 if opponent_turn  == "black" else -1
+                                   
                                     await connected_sockets[opponent_id].send_text(json.dumps({
                                         "type": "update_board",
                                         "board": json.loads(opponent_board_data),
-                                        "current_player": current_player_value,
+                                        
                                     }))
                             except Exception as e:
                                 logging.info(f"[WARN] Failed to notify opponent: {e}")
