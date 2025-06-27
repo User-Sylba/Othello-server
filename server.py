@@ -246,6 +246,25 @@ async def websocket_endpoint(websocket: WebSocket):
                         "your_color": opponent_color,
                         "your_turn": (next_turn == opponent_color)
             }))
+            elif data["type"] == "surrender":
+                surrender_id = data["user_id"]
+                opponent_id = await rdb.hget(f"user:{surrender_id}", "opponent")
+                game_id = await rdb.hget(f"user:{surrender_id}", "game_id")
+
+                logging.info(f"[SURRENDER] {surrender_id} が降参")
+
+    # 相手に通知
+                if opponent_id and opponent_id in connected_sockets:
+                    await connected_sockets[opponent_id].send_text(json.dumps({
+                        "type": "opponent_surrendered"
+                    }))
+    
+    # Redisの削除
+                if game_id:
+                    await rdb.delete(f"board:{game_id}")
+                    await rdb.delete(f"turn:{game_id}")
+                await rdb.delete(f"user:{surrender_id}")
+                await rdb.delete(f"user:{opponent_id}")
        
                     
             elif data.get("type") == "end_game":
