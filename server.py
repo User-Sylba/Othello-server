@@ -265,6 +265,9 @@ async def websocket_endpoint(websocket: WebSocket):
                     await rdb.delete(f"turn:{game_id}")
                 await rdb.delete(f"user:{surrender_id}")
                 await rdb.delete(f"user:{opponent_id}")
+
+                connected_sockets.pop(surrender_id, None)
+                connected_sockets.pop(opponent_id, None)
        
                     
             elif data.get("type") == "end_game":
