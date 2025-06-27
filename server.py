@@ -260,14 +260,20 @@ async def websocket_endpoint(websocket: WebSocket):
                     }))
     
     # Redisの削除
-                if game_id:
-                    await rdb.delete(f"board:{game_id}")
-                    await rdb.delete(f"turn:{game_id}")
-                await rdb.delete(f"user:{surrender_id}")
-                await rdb.delete(f"user:{opponent_id}")
+                
+                # Redisに expire を設定（すぐ削除せず、後で wait_end が処理）
+                    await rdb.expire(f"board:{game_id}", 1)
+                    await rdb.expire(f"turn:{game_id}", 1)
 
-                connected_sockets.pop(surrender_id, None)
-                connected_sockets.pop(opponent_id, None)
+                    await rdb.expire(f"user:{surrender_id}", 1)
+                    await rdb.expire(f"user:{opponent_id}", 1)
+
+# 接続解除
+                    connected_sockets.pop(surrender_id, None)
+                    connected_sockets.pop(opponent_id, None)
+
+# 終了処理をスケジュール（disconnectと統一）
+                    asyncio.create_task(wait_end(surrender_id, opponent_id))
        
                     
             elif data.get("type") == "end_game":
