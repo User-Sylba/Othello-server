@@ -47,6 +47,7 @@ async def websocket_endpoint(websocket: WebSocket):
         if data_type == "register":
             user_id = init_data.get("user_id")
             name = init_data.get("name")
+            mode = init_data.get("mode", "online")
             connected_sockets[user_id] = websocket
 
             logging.info(f"[REGISTER] user_id={user_id}, name={name} が接続しました")
@@ -112,7 +113,8 @@ async def websocket_endpoint(websocket: WebSocket):
                     await rdb.hset(f"user:{user_id}", mapping={
                         "name": name,
                         "status": "waiting",
-                        "opponent": ""
+                        "opponent": "",
+                        "mode": mode
                     })
                     asyncio.create_task(try_match(user_id))
             else:
@@ -122,9 +124,15 @@ async def websocket_endpoint(websocket: WebSocket):
                 await rdb.hset(f"user:{user_id}", mapping={
                     "name": name,
                     "status": "waiting",
-                    "opponent": ""
+                    "opponent": "",
+                    "mode": mode
                 })
-                asyncio.create_task(try_match(user_id))
+                
+
+                if mode == "cpu":
+                    await start_cpu_game(websocket, user_id, name)
+                else:
+                    asyncio.create_task(try_match(user_id))
 
    
         
@@ -202,6 +210,41 @@ async def websocket_endpoint(websocket: WebSocket):
                             "your_color": "black" if my_color == 1 else "white",
                             "your_turn": (next_turn == color)
                         }))
+                                        # 追加：相手がCPUなら即応答
+                if opponent_id == "cpu":
+                    
+
+                    def valid_moves(board, color):
+                        moves = []
+                        for i in range(8):
+                            for j in range(8):
+                                temp_board = [row[:] for row in board]
+                                result = place_stone(temp_board, i, j, color)
+                                if result != board:
+                                    moves.append((i, j))
+                        return moves
+                    
+                    cpu_value = 1 if opponent_color == "black" else -1
+                    cpu_moves = valid_moves(board, cpu_value)
+
+                    if cpu_moves:
+                        cx, cy = random.choice(cpu_moves)
+                        board = place_stone(board, cx, cy, cpu_value)
+
+                        # ターンを元に戻す（再びプレイヤー）
+                        next_turn = my_color
+
+                        # 通知（player = user_id）
+                        if connected_sockets.get(user_id):
+                            await connected_sockets[user_id].send_text(json.dumps({
+                                "type": "move",
+                                "x": cx,
+                                "y": cy,
+                                "color": opponent_color,
+                                "next_turn": next_turn,
+                                "your_color": my_color,
+                                "your_turn": True
+                            }))
 
             elif data.get("type") == "pass":
                 game_id = await rdb.hget(f"user:{user_id}", "game_id")
@@ -246,6 +289,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         "your_color": opponent_color,
                         "your_turn": (next_turn == opponent_color)
             }))
+                    
             elif data["type"] == "surrender":
                 surrender_id = data["user_id"]
                 opponent_id = await rdb.hget(f"user:{surrender_id}", "opponent")
@@ -410,7 +454,45 @@ async def try_match(current_id):
     await rdb.set(f"board:{game_id}", json.dumps(board), ex=3600)
     
     await rdb.set(f"turn:{game_id}", first_turn, ex=3600)
+
+async def start_cpu_game(user_id):
+    logging.info(f"[CPU] {user_id} と CPU の対戦を開始します")
+
+    # CPU対戦用にゲームIDを生成。今はいらない）
+    #game_id = str(uuid.uuid4())
+
+    # プレイヤーの色をランダムに決定
+    user_color = random.choice(["black", "white"])
     
+    first_turn = random.choice(["black", "white"])
+
+    # プレイヤー情報をRedisに保存（opponentは "cpu" 扱い）
+    await rdb.hset(f"user:{user_id}", mapping={
+        #"game_id": game_id,
+        "status": "matched",
+        "opponent": "cpu",
+        "color": user_color,
+        "opponent_name": "CPU"
+    })
+
+    # 初期盤面を保存
+    board = save_board()
+    #await rdb.set(f"board:{game_id}", json.dumps(board), ex=3600)
+    #await rdb.set(f"turn:{game_id}", first_turn, ex=3600)
+    
+
+    # プレイヤーにゲーム開始メッセージ送信
+    if user_id in connected_sockets:
+        await connected_sockets[user_id].send_text(json.dumps({
+            "type": "start_game",
+            "your_color": user_color,
+            "opponent_name": "CPU",
+            "first_turn": first_turn,
+            "board": board
+        }))
+        logging.info(f"[CPU] start_game sent to {user_id}")
+    else:
+        logging.warning(f"[CPU] {user_id} が connected_sockets に存在しません")
 
 async def handle_disconnect(user_id):
     
